@@ -111,6 +111,7 @@ set(SOURCES_UTILITIES
     src/utilities/log.cpp
     src/utilities/math.cpp
     src/utilities/memory.cpp
+    src/utilities/notify.cpp
     src/utilities/render.cpp
     src/utilities/trace.cpp
 )

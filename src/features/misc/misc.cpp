@@ -34,22 +34,11 @@ void F::MISC::Destroy()
 }
 
 // ---------------------------------------------------------------
-// OnPresent — watermark and visual overlays
+// OnPresent — visual overlays (watermark handled by MENU system)
 // ---------------------------------------------------------------
 void F::MISC::OnPresent()
 {
-	if (!C::Get<bool>(misc_watermark))
-		return;
-
-	// calculate FPS from frame time
-	float flFPS = 0.0f;
-	if (I::GlobalVars && I::GlobalVars->flFrameTime > 0.0f)
-		flFPS = 1.0f / I::GlobalVars->flFrameTime;
-
-	char szWatermark[128];
-	snprintf(szWatermark, sizeof(szWatermark), "GamerHack v1.0.0 | %.0f fps", flFPS);
-
-	D::DrawText(Vector2D(10.0f, 10.0f), Color(180, 140, 255, 230), szWatermark, false);
+	// watermark is now handled by MENU::RenderWatermark()
 }
 
 // ---------------------------------------------------------------

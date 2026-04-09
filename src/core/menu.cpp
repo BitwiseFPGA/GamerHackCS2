@@ -3,28 +3,30 @@
 #include "variables.h"
 #include "../utilities/render.h"
 #include "../utilities/input.h"
+#include "../utilities/notify.h"
+#include "../utilities/easing.h"
 #include "../sdk/datatypes/color.h"
 #include "../sdk/common.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <string>
 #include <vector>
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
 
 // ---------------------------------------------------------------
-// tab identifiers
+// constants
 // ---------------------------------------------------------------
-enum EMenuTab : int
-{
-	TAB_AIMBOT = 0,
-	TAB_VISUALS,
-	TAB_MISC,
-	TAB_INVENTORY,
-	TAB_CONFIG,
-	TAB_COUNT
-};
+static constexpr int MAX_PARTICLES = 120;
+static constexpr float PARTICLE_CONNECT_DIST = 180.0f;
+static constexpr float PARTICLE_RADIUS = 2.0f;
+static constexpr float MENU_WIDTH = 640.0f;
+static constexpr float MENU_HEIGHT = 480.0f;
 
 // ---------------------------------------------------------------
 // internal state
@@ -35,9 +37,100 @@ static bool bStyleInitialized = false;
 static bool bWaitingForKey = false;
 static int* pKeyTarget = nullptr;
 static int nWaitFrames = 0;
+static int nCurrentTab = 0;
+static bool bParticlesInitialized = false;
+static std::vector<Particle_t> vecParticles;
+static float flLastFrameTime = 0.0f;
 
 // ---------------------------------------------------------------
-// key name lookup (cycling buffer for safety)
+// animation handler
+// ---------------------------------------------------------------
+void AnimationHandler_t::Update(float flDeltaTime, float flDuration)
+{
+	if (flDuration <= 0.0f) flDuration = 0.2f;
+	const float flStep = flDeltaTime / flDuration;
+
+	if (bSwitch)
+	{
+		flValue += flStep;
+		if (flValue > 1.0f) flValue = 1.0f;
+	}
+	else
+	{
+		flValue -= flStep;
+		if (flValue < 0.0f) flValue = 0.0f;
+	}
+}
+
+// ---------------------------------------------------------------
+// particle system
+// ---------------------------------------------------------------
+static float RandFloat(float lo, float hi)
+{
+	return lo + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (hi - lo)));
+}
+
+void MENU::Particles::Initialize(const ImVec2& screenSize)
+{
+	srand(static_cast<unsigned>(time(nullptr)));
+	vecParticles.clear();
+	vecParticles.reserve(MAX_PARTICLES);
+
+	for (int i = 0; i < MAX_PARTICLES; i++)
+	{
+		Particle_t p;
+		p.vecPosition = ImVec2(RandFloat(0.0f, screenSize.x), RandFloat(0.0f, screenSize.y));
+		p.vecVelocity = ImVec2(RandFloat(-30.0f, 30.0f), RandFloat(-30.0f, 30.0f));
+		vecParticles.push_back(p);
+	}
+	bParticlesInitialized = true;
+}
+
+void MENU::Particles::Render(ImDrawList* pDrawList, const ImVec2& screenSize, float flAlpha)
+{
+	if (!bParticlesInitialized || vecParticles.empty())
+		Initialize(screenSize);
+
+	const float flDelta = ImGui::GetIO().DeltaTime;
+	const ImU32 colParticle = IM_COL32(200, 200, 220, static_cast<int>(100.0f * flAlpha));
+
+	for (size_t i = 0; i < vecParticles.size(); i++)
+	{
+		auto& p = vecParticles[i];
+
+		// update position
+		p.vecPosition.x += p.vecVelocity.x * flDelta;
+		p.vecPosition.y += p.vecVelocity.y * flDelta;
+
+		// bounce off edges
+		if (p.vecPosition.x < 0.0f) { p.vecPosition.x = 0.0f; p.vecVelocity.x *= -1.0f; }
+		if (p.vecPosition.y < 0.0f) { p.vecPosition.y = 0.0f; p.vecVelocity.y *= -1.0f; }
+		if (p.vecPosition.x > screenSize.x) { p.vecPosition.x = screenSize.x; p.vecVelocity.x *= -1.0f; }
+		if (p.vecPosition.y > screenSize.y) { p.vecPosition.y = screenSize.y; p.vecVelocity.y *= -1.0f; }
+
+		pDrawList->AddCircleFilled(p.vecPosition, PARTICLE_RADIUS, colParticle);
+
+		// draw connections to nearby particles
+		for (size_t j = i + 1; j < vecParticles.size(); j++)
+		{
+			const auto& other = vecParticles[j];
+			const float dx = p.vecPosition.x - other.vecPosition.x;
+			const float dy = p.vecPosition.y - other.vecPosition.y;
+			const float distSq = dx * dx + dy * dy;
+
+			if (distSq < PARTICLE_CONNECT_DIST * PARTICLE_CONNECT_DIST)
+			{
+				const float dist = std::sqrtf(distSq);
+				const float lineAlpha = (1.0f - dist / PARTICLE_CONNECT_DIST) * flAlpha;
+				const ImU32 colLine = IM_COL32(150, 150, 170, static_cast<int>(60.0f * lineAlpha));
+				pDrawList->AddLine(p.vecPosition, other.vecPosition, colLine, 1.0f);
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------
+// key name lookup
 // ---------------------------------------------------------------
 static const char* GetKeyName(int vkCode)
 {
@@ -63,31 +156,48 @@ static const char* GetKeyName(int vkCode)
 	case VK_CAPITAL:   return "CapsLock";
 	case VK_ESCAPE:    return "Esc";
 	default:
-		if (vkCode >= 'A' && vkCode <= 'Z')
-		{
-			buf[0] = static_cast<char>(vkCode);
-			buf[1] = '\0';
-			return buf;
-		}
-		if (vkCode >= '0' && vkCode <= '9')
-		{
-			buf[0] = static_cast<char>(vkCode);
-			buf[1] = '\0';
-			return buf;
-		}
-		if (vkCode >= VK_F1 && vkCode <= VK_F12)
-		{
-			snprintf(buf, sizeof(szBufs[0]), "F%d", vkCode - VK_F1 + 1);
-			return buf;
-		}
-		snprintf(buf, sizeof(szBufs[0]), "0x%02X", vkCode);
-		return buf;
+		if (vkCode >= 'A' && vkCode <= 'Z') { buf[0] = static_cast<char>(vkCode); buf[1] = '\0'; return buf; }
+		if (vkCode >= '0' && vkCode <= '9') { buf[0] = static_cast<char>(vkCode); buf[1] = '\0'; return buf; }
+		if (vkCode >= VK_F1 && vkCode <= VK_F12) { snprintf(buf, 16, "F%d", vkCode - VK_F1 + 1); return buf; }
+		snprintf(buf, 16, "0x%02X", vkCode); return buf;
 	}
 }
 
 // =================================================================
-// style setup
+// style setup with dynamic accent colors
 // =================================================================
+static void UpdateStyleColors()
+{
+	ImGuiStyle& style = ImGui::GetStyle();
+	ImVec4* c = style.Colors;
+
+	const Color& acc = C::Get<Color>(menu_accent_color);
+	const Color& accH = C::Get<Color>(menu_accent_hover);
+	const Color& accA = C::Get<Color>(menu_accent_active);
+
+	const ImVec4 accent   = ImVec4(acc.BaseFloat(0), acc.BaseFloat(1), acc.BaseFloat(2), 1.0f);
+	const ImVec4 accentDk = ImVec4(accent.x * 0.75f, accent.y * 0.75f, accent.z * 0.75f, 1.0f);
+	const ImVec4 accentLt = ImVec4(accA.BaseFloat(0), accA.BaseFloat(1), accA.BaseFloat(2), 1.0f);
+	const ImVec4 accentHv = ImVec4(accH.BaseFloat(0), accH.BaseFloat(1), accH.BaseFloat(2), 1.0f);
+
+	c[ImGuiCol_TitleBgActive]        = accentDk;
+	c[ImGuiCol_ScrollbarGrabActive]  = accent;
+	c[ImGuiCol_CheckMark]            = accentLt;
+	c[ImGuiCol_SliderGrab]           = accent;
+	c[ImGuiCol_SliderGrabActive]     = accentLt;
+	c[ImGuiCol_ButtonHovered]        = accentHv;
+	c[ImGuiCol_ButtonActive]         = accent;
+	c[ImGuiCol_HeaderHovered]        = accentHv;
+	c[ImGuiCol_HeaderActive]         = accent;
+	c[ImGuiCol_SeparatorHovered]     = accent;
+	c[ImGuiCol_SeparatorActive]      = accentLt;
+	c[ImGuiCol_ResizeGripHovered]    = accent;
+	c[ImGuiCol_ResizeGripActive]     = accentLt;
+	c[ImGuiCol_TabHovered]           = accent;
+	c[ImGuiCol_TabActive]            = accentDk;
+	c[ImGuiCol_TextSelectedBg]       = ImVec4(accent.x, accent.y, accent.z, 0.35f);
+}
+
 void MENU::SetupStyle()
 {
 	ImGuiStyle& style = ImGui::GetStyle();
@@ -113,53 +223,33 @@ void MENU::SetupStyle()
 	style.GrabRounding      = 4.0f;
 	style.TabRounding       = 4.0f;
 
-	// colors — dark theme with purple-blue accent
+	// base colors — dark theme
 	ImVec4* c = style.Colors;
-
-	const ImVec4 accent   = ImVec4(0.40f, 0.30f, 0.85f, 1.00f);
-	const ImVec4 accentDk = ImVec4(0.30f, 0.22f, 0.65f, 1.00f);
-	const ImVec4 accentLt = ImVec4(0.55f, 0.45f, 0.95f, 1.00f);
-
-	c[ImGuiCol_WindowBg]             = ImVec4(0.08f, 0.08f, 0.10f, 0.94f);
-	c[ImGuiCol_ChildBg]              = ImVec4(0.06f, 0.06f, 0.08f, 0.50f);
+	c[ImGuiCol_WindowBg]             = ImVec4(0.07f, 0.07f, 0.09f, 0.96f);
+	c[ImGuiCol_ChildBg]              = ImVec4(0.06f, 0.06f, 0.08f, 0.60f);
 	c[ImGuiCol_PopupBg]              = ImVec4(0.08f, 0.08f, 0.10f, 0.96f);
 	c[ImGuiCol_Border]               = ImVec4(0.20f, 0.20f, 0.25f, 0.50f);
 	c[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-	c[ImGuiCol_FrameBg]              = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
-	c[ImGuiCol_FrameBgHovered]       = ImVec4(0.16f, 0.16f, 0.20f, 1.00f);
-	c[ImGuiCol_FrameBgActive]        = ImVec4(0.20f, 0.18f, 0.28f, 1.00f);
-	c[ImGuiCol_TitleBg]              = ImVec4(0.06f, 0.06f, 0.08f, 1.00f);
-	c[ImGuiCol_TitleBgActive]        = accentDk;
-	c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.06f, 0.06f, 0.08f, 0.50f);
-	c[ImGuiCol_MenuBarBg]            = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
-	c[ImGuiCol_ScrollbarBg]          = ImVec4(0.06f, 0.06f, 0.08f, 0.50f);
+	c[ImGuiCol_FrameBg]              = ImVec4(0.10f, 0.10f, 0.13f, 1.00f);
+	c[ImGuiCol_FrameBgHovered]       = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
+	c[ImGuiCol_FrameBgActive]        = ImVec4(0.18f, 0.16f, 0.24f, 1.00f);
+	c[ImGuiCol_TitleBg]              = ImVec4(0.05f, 0.05f, 0.07f, 1.00f);
+	c[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.05f, 0.05f, 0.07f, 0.50f);
+	c[ImGuiCol_MenuBarBg]            = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
+	c[ImGuiCol_ScrollbarBg]          = ImVec4(0.05f, 0.05f, 0.07f, 0.50f);
 	c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.20f, 0.20f, 0.25f, 1.00f);
 	c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.28f, 0.28f, 0.35f, 1.00f);
-	c[ImGuiCol_ScrollbarGrabActive]  = accent;
-	c[ImGuiCol_CheckMark]            = accentLt;
-	c[ImGuiCol_SliderGrab]           = accent;
-	c[ImGuiCol_SliderGrabActive]     = accentLt;
-	c[ImGuiCol_Button]               = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
-	c[ImGuiCol_ButtonHovered]        = ImVec4(0.20f, 0.18f, 0.28f, 1.00f);
-	c[ImGuiCol_ButtonActive]         = accent;
-	c[ImGuiCol_Header]               = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
-	c[ImGuiCol_HeaderHovered]        = ImVec4(0.20f, 0.18f, 0.28f, 1.00f);
-	c[ImGuiCol_HeaderActive]         = accent;
+	c[ImGuiCol_Button]               = ImVec4(0.12f, 0.12f, 0.16f, 1.00f);
+	c[ImGuiCol_Header]               = ImVec4(0.12f, 0.12f, 0.16f, 1.00f);
 	c[ImGuiCol_Separator]            = ImVec4(0.20f, 0.20f, 0.25f, 0.50f);
-	c[ImGuiCol_SeparatorHovered]     = accent;
-	c[ImGuiCol_SeparatorActive]      = accentLt;
 	c[ImGuiCol_ResizeGrip]           = ImVec4(0.20f, 0.20f, 0.25f, 0.25f);
-	c[ImGuiCol_ResizeGripHovered]    = accent;
-	c[ImGuiCol_ResizeGripActive]     = accentLt;
-	c[ImGuiCol_Tab]                  = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
-	c[ImGuiCol_TabHovered]           = accent;
-	c[ImGuiCol_TabActive]            = accentDk;
-	c[ImGuiCol_TabUnfocused]         = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
-	c[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
+	c[ImGuiCol_Tab]                  = ImVec4(0.10f, 0.10f, 0.13f, 1.00f);
+	c[ImGuiCol_TabUnfocused]         = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
+	c[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.12f, 0.12f, 0.16f, 1.00f);
 	c[ImGuiCol_Text]                 = ImVec4(0.90f, 0.90f, 0.92f, 1.00f);
 	c[ImGuiCol_TextDisabled]         = ImVec4(0.45f, 0.45f, 0.50f, 1.00f);
-	c[ImGuiCol_TextSelectedBg]       = ImVec4(accent.x, accent.y, accent.z, 0.35f);
 
+	UpdateStyleColors();
 	bStyleInitialized = true;
 }
 
@@ -183,12 +273,9 @@ bool MENU::SliderInt(const char* label, int* value, int min, int max)
 
 bool MENU::ColorEdit(const char* label, Color* color)
 {
-	if (!color)
-		return false;
-
+	if (!color) return false;
 	float col[4];
 	color->ToFloat4(col);
-
 	if (ImGui::ColorEdit4(label, col, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar))
 	{
 		*color = Color::FromFloat4(col);
@@ -204,9 +291,7 @@ bool MENU::Combo(const char* label, int* value, const char** items, int itemCoun
 
 bool MENU::KeyBind(const char* label, int* key)
 {
-	if (!key)
-		return false;
-
+	if (!key) return false;
 	const bool bThisWaiting = (bWaitingForKey && pKeyTarget == key);
 
 	char szBuf[64];
@@ -226,17 +311,10 @@ bool MENU::KeyBind(const char* label, int* key)
 
 	if (bThisWaiting)
 	{
-		// skip a few frames to avoid catching the click that started waiting
-		if (nWaitFrames > 0)
-		{
-			nWaitFrames--;
-			return false;
-		}
-
+		if (nWaitFrames > 0) { nWaitFrames--; return false; }
 		for (int i = 1; i < 256; i++)
 		{
 			if (i == VK_INSERT) continue;
-
 			if (GetAsyncKeyState(i) & 0x8000)
 			{
 				*key = (i == VK_ESCAPE) ? 0 : i;
@@ -246,7 +324,6 @@ bool MENU::KeyBind(const char* label, int* key)
 			}
 		}
 	}
-
 	return false;
 }
 
@@ -257,10 +334,8 @@ bool MENU::Button(const char* label, const ImVec2& size)
 
 void MENU::Separator(const char* label)
 {
-	if (label)
-		ImGui::SeparatorText(label);
-	else
-		ImGui::Separator();
+	if (label) ImGui::SeparatorText(label);
+	else ImGui::Separator();
 }
 
 void MENU::Tooltip(const char* text)
@@ -270,105 +345,179 @@ void MENU::Tooltip(const char* text)
 }
 
 // =================================================================
+// sidebar tab definitions
+// =================================================================
+struct TabDef
+{
+	const char* szLabel;
+	const char* szIcon;
+	void (*pRender)();
+};
+
+// forward declarations for tab render functions
+static void RenderAimbotTab();
+static void RenderVisualsTab();
+static void RenderMiscTab();
+static void RenderInventoryTab();
+static void RenderConfigTab();
+static void RenderSettingsTab();
+
+static const TabDef g_tabs[] = {
+	{ "Aimbot",    "[A]", RenderAimbotTab },
+	{ "Visuals",   "[V]", RenderVisualsTab },
+	{ "Misc",      "[M]", RenderMiscTab },
+	{ "Inventory", "[I]", RenderInventoryTab },
+	{ "Config",    "[C]", RenderConfigTab },
+	{ "Settings",  "[S]", RenderSettingsTab },
+};
+static constexpr int TAB_COUNT = sizeof(g_tabs) / sizeof(g_tabs[0]);
+
+// =================================================================
 // tab rendering
 // =================================================================
 static void RenderAimbotTab()
 {
-	MENU::Checkbox("Enable##aim", &C::Get<bool>(aimbot_enabled));
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	MENU::SliderFloat("FOV", &C::Get<float>(aimbot_fov), 0.0f, 30.0f, "%.1f");
-	MENU::Tooltip("Aimbot field of view cone");
-
-	MENU::SliderFloat("Smooth", &C::Get<float>(aimbot_smooth), 0.0f, 20.0f, "%.1f");
-	MENU::Tooltip("Higher = slower aim correction");
-
-	// bone selection — map combo index to game bone index
-	static const char* boneNames[] = { "Head", "Neck", "Chest", "Stomach", "Pelvis" };
-	static const int boneLUT[] = { 6, 5, 4, 2, 0 };
-
-	int& bone = C::Get<int>(aimbot_bone);
-	int currentSel = 0;
-	for (int i = 0; i < 5; i++)
+	ImGui::BeginChild("##aim_main", ImVec2(0, 0), ImGuiChildFlags_Borders);
 	{
-		if (boneLUT[i] == bone) { currentSel = i; break; }
+		MENU::Separator("Aimbot");
+		MENU::Checkbox("Enable##aim", &C::Get<bool>(aimbot_enabled));
+
+		ImGui::Spacing();
+		MENU::SliderFloat("FOV", &C::Get<float>(aimbot_fov), 0.0f, 30.0f, "%.1f");
+		MENU::Tooltip("Aimbot field of view cone");
+
+		MENU::SliderFloat("Smooth", &C::Get<float>(aimbot_smooth), 0.0f, 20.0f, "%.1f");
+		MENU::Tooltip("Higher = slower aim correction");
+
+		static const char* boneNames[] = { "Head", "Neck", "Chest", "Stomach", "Pelvis" };
+		static const int boneLUT[] = { 6, 5, 4, 2, 0 };
+
+		int& bone = C::Get<int>(aimbot_bone);
+		int currentSel = 0;
+		for (int i = 0; i < 5; i++)
+			if (boneLUT[i] == bone) { currentSel = i; break; }
+		if (MENU::Combo("Target Bone", &currentSel, boneNames, 5))
+			bone = boneLUT[currentSel];
+
+		MENU::Checkbox("Visible Only", &C::Get<bool>(aimbot_visible_only));
+
+		ImGui::Text("Aim Key:");
+		MENU::KeyBind("aimkey", &C::Get<int>(aimbot_key));
 	}
-	if (MENU::Combo("Target Bone", &currentSel, boneNames, 5))
-		bone = boneLUT[currentSel];
+	ImGui::EndChild();
 
-	MENU::Checkbox("Visible Only", &C::Get<bool>(aimbot_visible_only));
-
-	ImGui::Text("Aim Key:");
-	MENU::KeyBind("aimkey", &C::Get<int>(aimbot_key));
+	ImGui::PopStyleVar();
 }
 
 static void RenderVisualsTab()
 {
-	MENU::Checkbox("Enable##esp", &C::Get<bool>(esp_enabled));
+	const float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	MENU::Separator("Box ESP");
-	MENU::Checkbox("Box", &C::Get<bool>(esp_box));
-
-	if (C::Get<bool>(esp_box))
+	// left column
+	ImGui::BeginChild("##vis_left", ImVec2(halfW, 0), ImGuiChildFlags_Borders);
 	{
-		static const char* boxTypes[] = { "Normal", "Corner" };
-		MENU::Combo("Box Type", &C::Get<int>(esp_box_type), boxTypes, 2);
-		MENU::ColorEdit("T Color##box", &C::Get<Color>(esp_box_color_t));
-		MENU::ColorEdit("CT Color##box", &C::Get<Color>(esp_box_color_ct));
+		MENU::Separator("ESP");
+		MENU::Checkbox("Enable##esp", &C::Get<bool>(esp_enabled));
+
+		ImGui::Spacing();
+		MENU::Checkbox("Box", &C::Get<bool>(esp_box));
+		if (C::Get<bool>(esp_box))
+		{
+			static const char* boxTypes[] = { "Normal", "Corner" };
+			MENU::Combo("Box Type", &C::Get<int>(esp_box_type), boxTypes, 2);
+			MENU::ColorEdit("T Color##box", &C::Get<Color>(esp_box_color_t));
+			MENU::ColorEdit("CT Color##box", &C::Get<Color>(esp_box_color_ct));
+		}
+
+		ImGui::Spacing();
+		MENU::Checkbox("Name", &C::Get<bool>(esp_name));
+		MENU::Checkbox("Health Bar", &C::Get<bool>(esp_health));
+		MENU::Checkbox("Armor Bar", &C::Get<bool>(esp_armor));
+		MENU::Checkbox("Weapon", &C::Get<bool>(esp_weapon));
+		MENU::Checkbox("Skeleton", &C::Get<bool>(esp_skeleton));
+		MENU::Checkbox("Snaplines", &C::Get<bool>(esp_snaplines));
 	}
+	ImGui::EndChild();
 
-	MENU::Separator("Player Info");
-	MENU::Checkbox("Name", &C::Get<bool>(esp_name));
-	MENU::Checkbox("Health Bar", &C::Get<bool>(esp_health));
-	MENU::Checkbox("Armor Bar", &C::Get<bool>(esp_armor));
-	MENU::Checkbox("Weapon", &C::Get<bool>(esp_weapon));
-	MENU::Checkbox("Skeleton", &C::Get<bool>(esp_skeleton));
-	MENU::Checkbox("Snaplines", &C::Get<bool>(esp_snaplines));
+	ImGui::SameLine();
 
-	MENU::Separator("Glow");
-	MENU::Checkbox("Enable##glow", &C::Get<bool>(glow_enabled));
-	if (C::Get<bool>(glow_enabled))
+	// right column
+	ImGui::BeginChild("##vis_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
 	{
-		MENU::ColorEdit("T Color##glow", &C::Get<Color>(glow_color_t));
-		MENU::ColorEdit("CT Color##glow", &C::Get<Color>(glow_color_ct));
+		MENU::Separator("Glow");
+		MENU::Checkbox("Enable##glow", &C::Get<bool>(glow_enabled));
+		if (C::Get<bool>(glow_enabled))
+		{
+			MENU::ColorEdit("T Color##glow", &C::Get<Color>(glow_color_t));
+			MENU::ColorEdit("CT Color##glow", &C::Get<Color>(glow_color_ct));
+		}
 	}
+	ImGui::EndChild();
+
+	ImGui::PopStyleVar();
 }
 
 static void RenderMiscTab()
 {
-	MENU::Separator("Movement");
-	MENU::Checkbox("Bunny Hop", &C::Get<bool>(misc_bhop));
-	MENU::Checkbox("Auto Strafe", &C::Get<bool>(misc_autostrafe));
+	const float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	MENU::Separator("Visual");
-	MENU::Checkbox("No Flash", &C::Get<bool>(misc_noflash));
-	if (C::Get<bool>(misc_noflash))
-		MENU::SliderFloat("Flash Alpha", &C::Get<float>(misc_noflash_alpha), 0.0f, 255.0f, "%.0f");
+	ImGui::BeginChild("##misc_left", ImVec2(halfW, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Movement");
+		MENU::Checkbox("Bunny Hop", &C::Get<bool>(misc_bhop));
+		MENU::Checkbox("Auto Strafe", &C::Get<bool>(misc_autostrafe));
 
-	MENU::Separator("Camera");
-	MENU::Checkbox("Third Person", &C::Get<bool>(misc_thirdperson));
-	if (C::Get<bool>(misc_thirdperson))
-		MENU::SliderFloat("Distance", &C::Get<float>(misc_thirdperson_distance), 50.0f, 300.0f, "%.0f");
+		ImGui::Spacing();
+		MENU::Separator("Visual");
+		MENU::Checkbox("No Flash", &C::Get<bool>(misc_noflash));
+		if (C::Get<bool>(misc_noflash))
+			MENU::SliderFloat("Flash Alpha", &C::Get<float>(misc_noflash_alpha), 0.0f, 255.0f, "%.0f");
+	}
+	ImGui::EndChild();
 
-	MENU::SliderFloat("FOV Changer", &C::Get<float>(misc_fov_changer), 60.0f, 140.0f, "%.0f");
+	ImGui::SameLine();
 
-	MENU::Separator("Other");
-	MENU::Checkbox("Watermark", &C::Get<bool>(misc_watermark));
+	ImGui::BeginChild("##misc_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Camera");
+		MENU::Checkbox("Third Person", &C::Get<bool>(misc_thirdperson));
+		if (C::Get<bool>(misc_thirdperson))
+			MENU::SliderFloat("Distance", &C::Get<float>(misc_thirdperson_distance), 50.0f, 300.0f, "%.0f");
+
+		MENU::SliderFloat("FOV Changer", &C::Get<float>(misc_fov_changer), 60.0f, 140.0f, "%.0f");
+	}
+	ImGui::EndChild();
+
+	ImGui::PopStyleVar();
 }
 
 static void RenderInventoryTab()
 {
-	MENU::Checkbox("Enable##inv", &C::Get<bool>(inventory_enabled));
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	MENU::Separator();
-	ImGui::TextDisabled("Skin changer configuration");
-	ImGui::TextDisabled("Select a weapon to configure skins:");
-
-	ImGui::BeginChild("##skinlist", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	ImGui::BeginChild("##inv_main", ImVec2(0, 0), ImGuiChildFlags_Borders);
 	{
-		ImGui::TextDisabled("No weapons configured yet.");
-		ImGui::TextDisabled("Weapon skin UI will be added here.");
+		MENU::Separator("Skin Changer");
+		MENU::Checkbox("Enable##inv", &C::Get<bool>(inventory_enabled));
+
+		ImGui::Spacing();
+		ImGui::TextDisabled("Select a weapon to configure skins:");
+		ImGui::Spacing();
+
+		ImGui::BeginChild("##skinlist", ImVec2(0, -4), ImGuiChildFlags_Borders);
+		{
+			ImGui::TextDisabled("No weapons configured yet.");
+			ImGui::TextDisabled("Weapon skin UI will be added in a future update.");
+		}
+		ImGui::EndChild();
 	}
 	ImGui::EndChild();
+
+	ImGui::PopStyleVar();
 }
 
 static void RenderConfigTab()
@@ -380,50 +529,165 @@ static void RenderConfigTab()
 		bNeedsRefresh = false;
 	}
 
-	// config file list
-	ImGui::BeginChild("##configlist", ImVec2(0, -80), ImGuiChildFlags_Borders);
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+
+	ImGui::BeginChild("##cfg_main", ImVec2(0, 0), ImGuiChildFlags_Borders);
 	{
-		for (size_t i = 0; i < vecConfigList.size(); i++)
+		MENU::Separator("Configuration");
+
+		// config file list
+		ImGui::BeginChild("##configlist", ImVec2(0, -90), ImGuiChildFlags_Borders);
 		{
-			if (ImGui::Selectable(vecConfigList[i].c_str()))
-				strncpy_s(szConfigName, vecConfigList[i].c_str(), sizeof(szConfigName) - 1);
+			for (size_t i = 0; i < vecConfigList.size(); i++)
+			{
+				const bool bSelected = (strcmp(szConfigName, vecConfigList[i].c_str()) == 0);
+				if (ImGui::Selectable(vecConfigList[i].c_str(), bSelected))
+					strncpy_s(szConfigName, vecConfigList[i].c_str(), sizeof(szConfigName) - 1);
+			}
+			if (vecConfigList.empty())
+				ImGui::TextDisabled("No configs found");
 		}
+		ImGui::EndChild();
+
+		ImGui::InputText("Config Name", szConfigName, sizeof(szConfigName));
+
+		const float flBtnW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3.0f) / 4.0f;
+
+		if (MENU::Button("Save", ImVec2(flBtnW, 0)))
+		{
+			if (szConfigName[0] != '\0')
+			{
+				C::SaveFile(szConfigName);
+				bNeedsRefresh = true;
+				NOTIFY::Push("Config saved!", NOTIFY_SUCCESS);
+			}
+		}
+		ImGui::SameLine();
+		if (MENU::Button("Load", ImVec2(flBtnW, 0)))
+		{
+			if (szConfigName[0] != '\0')
+			{
+				C::LoadFile(szConfigName);
+				NOTIFY::Push("Config loaded!", NOTIFY_INFO);
+			}
+		}
+		ImGui::SameLine();
+		if (MENU::Button("Delete", ImVec2(flBtnW, 0)))
+		{
+			if (szConfigName[0] != '\0')
+			{
+				C::DeleteFile(szConfigName);
+				bNeedsRefresh = true;
+				NOTIFY::Push("Config deleted", NOTIFY_WARNING);
+			}
+		}
+		ImGui::SameLine();
+		if (MENU::Button("Refresh", ImVec2(flBtnW, 0)))
+			bNeedsRefresh = true;
 	}
 	ImGui::EndChild();
 
-	ImGui::InputText("Config Name", szConfigName, sizeof(szConfigName));
+	ImGui::PopStyleVar();
+}
 
-	const float flBtnW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3.0f) / 4.0f;
+static void RenderSettingsTab()
+{
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	if (MENU::Button("Save", ImVec2(flBtnW, 0)))
+	const float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+
+	ImGui::BeginChild("##settings_left", ImVec2(halfW, 0), ImGuiChildFlags_Borders);
 	{
-		if (szConfigName[0] != '\0')
+		MENU::Separator("Menu Effects");
+		MENU::Checkbox("Particles", &C::Get<bool>(menu_particles));
+		MENU::Tooltip("Floating particle background");
+
+		MENU::Checkbox("Dim Background", &C::Get<bool>(menu_dim_background));
+		MENU::Tooltip("Dim the game when menu is open");
+
+		MENU::Checkbox("Glow Effect", &C::Get<bool>(menu_glow_effect));
+		MENU::Tooltip("Shadow glow around menu window");
+
+		MENU::Checkbox("Watermark", &C::Get<bool>(menu_watermark));
+
+		ImGui::Spacing();
+		MENU::SliderFloat("Anim Speed", &C::Get<float>(menu_animation_speed), 0.5f, 3.0f, "%.1fx");
+		MENU::Tooltip("Menu animation speed multiplier");
+
+		static const char* dpiOptions[] = { "100%", "125%", "150%", "175%", "200%" };
+		MENU::Combo("DPI Scale", &C::Get<int>(menu_dpi_scale), dpiOptions, 5);
+	}
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+
+	ImGui::BeginChild("##settings_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Theme Colors");
+		MENU::ColorEdit("Accent", &C::Get<Color>(menu_accent_color));
+		MENU::ColorEdit("Accent Hover", &C::Get<Color>(menu_accent_hover));
+		MENU::ColorEdit("Accent Active", &C::Get<Color>(menu_accent_active));
+
+		ImGui::Spacing();
+		if (MENU::Button("Reset Colors", ImVec2(-1, 0)))
 		{
-			C::SaveFile(szConfigName);
-			bNeedsRefresh = true;
+			C::Get<Color>(menu_accent_color) = Color(85, 90, 160);
+			C::Get<Color>(menu_accent_hover) = Color(100, 105, 175);
+			C::Get<Color>(menu_accent_active) = Color(115, 120, 190);
+			NOTIFY::Push("Colors reset to defaults", NOTIFY_INFO);
 		}
-	}
 
-	ImGui::SameLine();
-	if (MENU::Button("Load", ImVec2(flBtnW, 0)))
-	{
-		if (szConfigName[0] != '\0')
-			C::LoadFile(szConfigName);
+		ImGui::Spacing();
+		ImGui::Spacing();
+		ImGui::TextDisabled("GamerHack v1.0.0");
+		ImGui::TextDisabled("Build: " __DATE__);
 	}
+	ImGui::EndChild();
 
-	ImGui::SameLine();
-	if (MENU::Button("Delete", ImVec2(flBtnW, 0)))
-	{
-		if (szConfigName[0] != '\0')
-		{
-			C::DeleteFile(szConfigName);
-			bNeedsRefresh = true;
-		}
-	}
+	ImGui::PopStyleVar();
+}
 
-	ImGui::SameLine();
-	if (MENU::Button("Refresh", ImVec2(flBtnW, 0)))
-		bNeedsRefresh = true;
+// =================================================================
+// watermark
+// =================================================================
+void MENU::RenderWatermark()
+{
+	if (!C::Get<bool>(menu_watermark))
+		return;
+
+	ImDrawList* pDrawList = ImGui::GetForegroundDrawList();
+	const ImVec2 screenSize = ImGui::GetIO().DisplaySize;
+
+	char szBuf[128];
+	snprintf(szBuf, sizeof(szBuf), "GamerHack v1.0.0 | %.0f fps", ImGui::GetIO().Framerate);
+
+	const ImVec2 textSize = ImGui::CalcTextSize(szBuf);
+	const float flPadX = 10.0f;
+	const float flPadY = 4.0f;
+	const float flX = screenSize.x - textSize.x - flPadX * 2.0f - 8.0f;
+	const float flY = 8.0f;
+
+	// background
+	pDrawList->AddRectFilled(
+		ImVec2(flX, flY),
+		ImVec2(flX + textSize.x + flPadX * 2.0f, flY + textSize.y + flPadY * 2.0f),
+		IM_COL32(15, 15, 20, 200), 6.0f);
+
+	// accent bar at top
+	const Color& acc = C::Get<Color>(menu_accent_color);
+	pDrawList->AddRectFilled(
+		ImVec2(flX, flY),
+		ImVec2(flX + textSize.x + flPadX * 2.0f, flY + 2.0f),
+		IM_COL32(acc.r, acc.g, acc.b, 200), 6.0f, ImDrawFlags_RoundCornersTop);
+
+	// border
+	pDrawList->AddRect(
+		ImVec2(flX, flY),
+		ImVec2(flX + textSize.x + flPadX * 2.0f, flY + textSize.y + flPadY * 2.0f),
+		IM_COL32(40, 40, 50, 120), 6.0f);
+
+	// text
+	pDrawList->AddText(ImVec2(flX + flPadX, flY + flPadY), IM_COL32(220, 220, 230, 255), szBuf);
 }
 
 // =================================================================
@@ -431,65 +695,190 @@ static void RenderConfigTab()
 // =================================================================
 void MENU::Render()
 {
-	if (!bIsOpen)
-		return;
-
 	if (!bStyleInitialized)
 		SetupStyle();
 
-	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	// update animation
+	const float flAnimSpeed = C::Get<float>(menu_animation_speed);
+	menuAnimation.SetSwitch(bIsOpen);
+	menuAnimation.Update(ImGui::GetIO().DeltaTime * flAnimSpeed, 0.3f);
+
+	// update accent colors every frame
+	UpdateStyleColors();
+
+	// always render watermark and notifications
+	RenderWatermark();
+	NOTIFY::Render();
+
+	const float flMenuAlpha = menuAnimation.GetValue();
+	if (flMenuAlpha <= 0.01f)
+		return;
+
+	ImDrawList* pBgDrawList = ImGui::GetBackgroundDrawList();
+	const ImVec2 screenSize = ImGui::GetIO().DisplaySize;
+
+	// dim background
+	if (C::Get<bool>(menu_dim_background))
+	{
+		const int dimAlpha = static_cast<int>(120.0f * flMenuAlpha);
+		pBgDrawList->AddRectFilled(
+			ImVec2(0, 0), screenSize,
+			IM_COL32(0, 0, 0, dimAlpha));
+	}
+
+	// particle background
+	if (C::Get<bool>(menu_particles))
+		Particles::Render(pBgDrawList, screenSize, flMenuAlpha);
+
+	// DPI scaling
+	static const float dpiLUT[] = { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
+	const int nDpiIdx = std::clamp(C::Get<int>(menu_dpi_scale), 0, 4);
+	const float flDpi = dpiLUT[nDpiIdx];
+
+	const float flW = MENU_WIDTH * flDpi;
+	const float flH = MENU_HEIGHT * flDpi;
+
+	ImGui::SetNextWindowSize(ImVec2(flW, flH), ImGuiCond_Always);
+	ImGui::PushStyleVar(ImGuiStyleVar_Alpha, flMenuAlpha);
 
 	constexpr ImGuiWindowFlags flags =
 		ImGuiWindowFlags_NoCollapse |
 		ImGuiWindowFlags_NoResize |
-		ImGuiWindowFlags_NoScrollbar;
+		ImGuiWindowFlags_NoScrollbar |
+		ImGuiWindowFlags_NoTitleBar;
 
-	if (!ImGui::Begin("GamerHack v1.0.0", &bIsOpen, flags))
+	if (!ImGui::Begin("##GamerHackMain", nullptr, flags))
 	{
 		ImGui::End();
+		ImGui::PopStyleVar();
 		return;
 	}
 
-	if (ImGui::BeginTabBar("##tabs"))
+	// glow effect around window
+	if (C::Get<bool>(menu_glow_effect))
 	{
-		if (ImGui::BeginTabItem("Aimbot"))
-		{
-			ImGui::BeginChild("##aimbot_c", ImVec2(0, 0), false);
-			RenderAimbotTab();
-			ImGui::EndChild();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Visuals"))
-		{
-			ImGui::BeginChild("##visuals_c", ImVec2(0, 0), false);
-			RenderVisualsTab();
-			ImGui::EndChild();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Misc"))
-		{
-			ImGui::BeginChild("##misc_c", ImVec2(0, 0), false);
-			RenderMiscTab();
-			ImGui::EndChild();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Inventory"))
-		{
-			ImGui::BeginChild("##inv_c", ImVec2(0, 0), false);
-			RenderInventoryTab();
-			ImGui::EndChild();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Config"))
-		{
-			ImGui::BeginChild("##cfg_c", ImVec2(0, 0), false);
-			RenderConfigTab();
-			ImGui::EndChild();
-			ImGui::EndTabItem();
-		}
+		const ImVec2 winPos = ImGui::GetWindowPos();
+		const ImVec2 winSize = ImGui::GetWindowSize();
+		const Color& acc = C::Get<Color>(menu_accent_color);
+		const int glowAlpha = static_cast<int>(30.0f * flMenuAlpha);
+		const float glowSize = 12.0f;
 
-		ImGui::EndTabBar();
+		ImDrawList* pFgDrawList = ImGui::GetForegroundDrawList();
+		for (float i = glowSize; i > 0.0f; i -= 2.0f)
+		{
+			const int a = static_cast<int>(static_cast<float>(glowAlpha) * (i / glowSize));
+			pFgDrawList->AddRect(
+				ImVec2(winPos.x - i, winPos.y - i),
+				ImVec2(winPos.x + winSize.x + i, winPos.y + winSize.y + i),
+				IM_COL32(acc.r, acc.g, acc.b, a), 8.0f + i, 0, 1.0f);
+		}
 	}
 
+	// title bar area
+	{
+		const Color& acc = C::Get<Color>(menu_accent_color);
+		ImDrawList* pWinDrawList = ImGui::GetWindowDrawList();
+		const ImVec2 winPos = ImGui::GetWindowPos();
+
+		// gradient title bar
+		pWinDrawList->AddRectFilledMultiColor(
+			winPos,
+			ImVec2(winPos.x + ImGui::GetWindowSize().x, winPos.y + 32.0f),
+			IM_COL32(acc.r / 3, acc.g / 3, acc.b / 3, 200),
+			IM_COL32(acc.r / 4, acc.g / 4, acc.b / 4, 200),
+			IM_COL32(0, 0, 0, 0),
+			IM_COL32(0, 0, 0, 0));
+
+		// title text
+		pWinDrawList->AddText(
+			ImVec2(winPos.x + 14.0f, winPos.y + 8.0f),
+			IM_COL32(220, 220, 230, 255), "GamerHack");
+
+		// version right-aligned
+		const char* szVer = "v1.0.0";
+		const ImVec2 verSize = ImGui::CalcTextSize(szVer);
+		pWinDrawList->AddText(
+			ImVec2(winPos.x + ImGui::GetWindowSize().x - verSize.x - 14.0f, winPos.y + 8.0f),
+			IM_COL32(140, 140, 150, 255), szVer);
+
+		// separator line
+		pWinDrawList->AddLine(
+			ImVec2(winPos.x + 1.0f, winPos.y + 32.0f),
+			ImVec2(winPos.x + ImGui::GetWindowSize().x - 1.0f, winPos.y + 32.0f),
+			IM_COL32(acc.r, acc.g, acc.b, 120), 1.0f);
+	}
+
+	ImGui::Dummy(ImVec2(0, 24.0f)); // space for custom title bar
+
+	// sidebar + content layout
+	const float sidebarW = 110.0f * flDpi;
+	const float contentH = ImGui::GetContentRegionAvail().y;
+
+	// sidebar
+	ImGui::BeginChild("##sidebar", ImVec2(sidebarW, contentH), false);
+	{
+		const Color& acc = C::Get<Color>(menu_accent_color);
+
+		for (int i = 0; i < TAB_COUNT; i++)
+		{
+			const bool bSelected = (nCurrentTab == i);
+
+			if (bSelected)
+			{
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(acc.BaseFloat(0), acc.BaseFloat(1), acc.BaseFloat(2), 0.3f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(acc.BaseFloat(0), acc.BaseFloat(1), acc.BaseFloat(2), 0.4f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(acc.BaseFloat(0), acc.BaseFloat(1), acc.BaseFloat(2), 0.5f));
+			}
+			else
+			{
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.15f, 0.20f, 0.5f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.20f, 0.20f, 0.25f, 0.6f));
+			}
+
+			char szLabel[64];
+			snprintf(szLabel, sizeof(szLabel), "  %s %s", g_tabs[i].szIcon, g_tabs[i].szLabel);
+
+			if (ImGui::Button(szLabel, ImVec2(sidebarW - 8.0f, 28.0f * flDpi)))
+				nCurrentTab = i;
+
+			ImGui::PopStyleColor(3);
+
+			// accent indicator for selected tab
+			if (bSelected)
+			{
+				ImDrawList* pWinDL = ImGui::GetWindowDrawList();
+				const ImVec2 btnMin = ImGui::GetItemRectMin();
+				const ImVec2 btnMax = ImGui::GetItemRectMax();
+				pWinDL->AddRectFilled(
+					ImVec2(btnMin.x, btnMin.y + 2.0f),
+					ImVec2(btnMin.x + 3.0f, btnMax.y - 2.0f),
+					IM_COL32(acc.r, acc.g, acc.b, 255), 2.0f);
+			}
+		}
+	}
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+
+	// vertical separator
+	{
+		ImDrawList* pWinDL = ImGui::GetWindowDrawList();
+		const ImVec2 curPos = ImGui::GetCursorScreenPos();
+		pWinDL->AddLine(
+			ImVec2(curPos.x - 4.0f, curPos.y),
+			ImVec2(curPos.x - 4.0f, curPos.y + contentH),
+			IM_COL32(40, 40, 50, 150), 1.0f);
+	}
+
+	// content area
+	ImGui::BeginChild("##content", ImVec2(0, contentH), false);
+	{
+		if (nCurrentTab >= 0 && nCurrentTab < TAB_COUNT && g_tabs[nCurrentTab].pRender)
+			g_tabs[nCurrentTab].pRender();
+	}
+	ImGui::EndChild();
+
 	ImGui::End();
+	ImGui::PopStyleVar();
 }
