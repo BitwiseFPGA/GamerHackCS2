@@ -120,9 +120,10 @@ namespace PATTERNS {
         // resolves the "48 89 2D" (mov [rip+disp32], rbp) which stores the swap chain ptr
         constexpr const char* SWAP_CHAIN = "48 89 2D ? ? ? ? 66 0F 7F 05";
 
-        // --- SwapChain (for hooks) ---
-        // Search: swap chain object load with null check in rendersystemdx11.dll
-        constexpr const char* SWAP_CHAIN_HOOK = "48 8B 0D ? ? ? ? 48 85 C9 74 ? 8B 41";
+        // --- SwapChain (for hooks, secondary path) ---
+        // Load swap chain obj → null check → virtual call. Note: JZ+FF variant (1 unique hit).
+        // Primary D3D hook path is now gameoverlayrenderer64.dll (PRESENT_OVERLAY).
+        constexpr const char* SWAP_CHAIN_HOOK = "48 8B 0D ? ? ? ? 48 85 C9 74 ? FF";
 
         // --- Present (gameoverlayrenderer64.dll) ---
         // Hook the Steam overlay's Present wrapper directly
@@ -162,7 +163,9 @@ namespace PATTERNS {
 
         // --- HUD ---
         constexpr const char* FIND_HUD_ELEMENT = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 49 8B F0 48 8B DA 48 8B F9 E8";
-        constexpr const char* SET_LOCAL_PLAYER_READY = "48 83 EC ? 48 8B 05 ? ? ? ? 0F B6 D1";
+        // SetLocalPlayerReady: sub rsp + mov r8, [rip+CCSGOInput] + movzx edx, cl + call vtable
+        // Changed from 'mov rax' (48 8B 05) to 'mov r8' (4C 8B 05) in current CS2 build
+        constexpr const char* SET_LOCAL_PLAYER_READY = "48 83 EC ? 4C 8B 05 ? ? ? ? 0F B6 D1";
 
         // --- CRC Spoofing (SerializePartialToArray) ---
         constexpr const char* SERIALIZE_PARTIAL_TO_ARRAY = "48 89 5C 24 ? 55 56 57 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4";
