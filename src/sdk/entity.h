@@ -49,6 +49,8 @@ namespace SCHEMA
 /// @param TYPE       — C++ type of the field
 /// @param NAME       — accessor function name
 /// @param FIELD      — schema field string in format "ClassName->m_fieldName"
+/// @note if the offset is 0 (schema dump failed), accessing the field will read the vtable.
+///       callers should check schema validity or use null checks on pointer-type fields.
 #define SCHEMA_FIELD(TYPE, NAME, FIELD) \
 	[[nodiscard]] __forceinline std::add_lvalue_reference_t<TYPE> NAME() \
 	{ \
@@ -627,15 +629,11 @@ class C_CSPlayerPawnBase : public C_BasePlayerPawn
 {
 public:
 	SCHEMA_FIELD(CCSPlayer_ViewModelServices*, GetViewModelServices, "C_CSPlayerPawnBase->m_pViewModelServices");
-	SCHEMA_FIELD(float, GetLowerBodyYawTarget, "C_CSPlayerPawnBase->m_flLowerBodyYawTarget");
 	SCHEMA_FIELD(float, GetFlashBangTime, "C_CSPlayerPawnBase->m_flFlashBangTime");
 	SCHEMA_FIELD(float, GetFlashMaxAlpha, "C_CSPlayerPawnBase->m_flFlashMaxAlpha");
 	SCHEMA_FIELD(float, GetFlashDuration, "C_CSPlayerPawnBase->m_flFlashDuration");
 	SCHEMA_FIELD(GameTime_t, GetLastSpawnTimeIndex, "C_CSPlayerPawnBase->m_flLastSpawnTimeIndex");
-	SCHEMA_FIELD(bool, IsGunGameImmunity, "C_CSPlayerPawnBase->m_bGunGameImmunity");
-	SCHEMA_FIELD(QAngle, GetEyeAngles, "C_CSPlayerPawnBase->m_angEyeAngles");
 	SCHEMA_FIELD(Vector3, GetLastSmokeOverlayColor, "C_CSPlayerPawnBase->m_vLastSmokeOverlayColor");
-	SCHEMA_FIELD(int, GetSurvivalTeam, "C_CSPlayerPawnBase->m_nSurvivalTeam");
 };
 
 // ---------------------------------------------------------------
@@ -675,9 +673,10 @@ public:
 	SCHEMA_FIELD(int, GetShotsFired, "C_CSPlayerPawn->m_iShotsFired");
 	SCHEMA_FIELD(std::int32_t, GetArmorValue, "C_CSPlayerPawn->m_ArmorValue");
 	SCHEMA_FIELD(QAngle, GetAimPunchAngle, "C_CSPlayerPawn->m_aimPunchAngle");
-	SCHEMA_FIELD(CUtlVector<QAngle>, GetAimPunchCache, "C_CSPlayerPawn->m_aimPunchCache");
 	SCHEMA_FIELD(EntitySpottedState_t, GetSpottedState, "C_CSPlayerPawn->m_entitySpottedState");
 	SCHEMA_FIELD(CBaseHandle, GetHudModelArms, "C_CSPlayerPawn->m_hHudModelArms");
+	SCHEMA_FIELD(bool, IsGunGameImmunity, "C_CSPlayerPawn->m_bGunGameImmunity");
+	SCHEMA_FIELD(QAngle, GetEyeAngles, "C_CSPlayerPawn->m_angEyeAngles");
 
 	// pointer variant for embedded C_EconItemView
 	SCHEMA_FIELD_POINTER(C_EconItemView, GetEconGloves, "C_CSPlayerPawn->m_EconGloves");

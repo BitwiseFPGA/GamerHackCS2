@@ -224,75 +224,83 @@ void F::VISUALS::OnPresent()
 	if (!I::GameEntitySystem)
 		return;
 
-	// get local player controller
-	const int nLocalIndex = I::Engine->GetLocalPlayer();
-	auto* pLocalController = I::GameEntitySystem->Get<CCSPlayerController>(nLocalIndex);
-	if (!pLocalController)
-		return;
-
-	auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPawnHandle());
-	if (!pLocalPawn)
-		return;
-
-	const int nLocalTeam = pLocalPawn->GetAssociatedTeam();
-
-	// iterate players (index 1..64)
-	for (int i = 1; i <= 64; i++)
+	__try
 	{
-		if (i == nLocalIndex)
-			continue;
+		// get local player controller
+		const int nLocalIndex = I::Engine->GetLocalPlayer();
+		auto* pLocalController = I::GameEntitySystem->Get<CCSPlayerController>(nLocalIndex);
+		if (!pLocalController)
+			return;
 
-		auto* pController = I::GameEntitySystem->Get<CCSPlayerController>(i);
-		if (!pController)
-			continue;
+		auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPawnHandle());
+		if (!pLocalPawn)
+			return;
 
-		// skip dead players
-		if (!pController->IsPawnAlive())
-			continue;
+		const int nLocalTeam = pLocalPawn->GetAssociatedTeam();
 
-		auto* pPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pController->GetPawnHandle());
-		if (!pPawn || pPawn == pLocalPawn)
-			continue;
+		// iterate players (index 1..64)
+		for (int i = 1; i <= 64; i++)
+		{
+			if (i == nLocalIndex)
+				continue;
 
-		// skip dormant
-		auto* pSceneNode = pPawn->GetGameSceneNode();
-		if (!pSceneNode || pSceneNode->IsDormant())
-			continue;
+			auto* pController = I::GameEntitySystem->Get<CCSPlayerController>(i);
+			if (!pController)
+				continue;
 
-		// skip teammates
-		const int nTeam = pPawn->GetAssociatedTeam();
-		if (nTeam == nLocalTeam)
-			continue;
+			// skip dead players
+			if (!pController->IsPawnAlive())
+				continue;
 
-		if (!pPawn->IsAlive())
-			continue;
+			auto* pPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pController->GetPawnHandle());
+			if (!pPawn || pPawn == pLocalPawn)
+				continue;
 
-		// get bounding box
-		BBox bbox;
-		if (!GetBoundingBox(pPawn, bbox))
-			continue;
+			// skip dormant
+			auto* pSceneNode = pPawn->GetGameSceneNode();
+			if (!pSceneNode || pSceneNode->IsDormant())
+				continue;
 
-		// draw features based on config
-		if (C::Get<bool>(esp_box))
-			DrawPlayerBox(bbox, nTeam);
+			// skip teammates
+			const int nTeam = pPawn->GetAssociatedTeam();
+			if (nTeam == nLocalTeam)
+				continue;
 
-		if (C::Get<bool>(esp_name))
-			DrawPlayerName(bbox, pController);
+			if (!pPawn->IsAlive())
+				continue;
 
-		if (C::Get<bool>(esp_health))
-			DrawPlayerHealth(bbox, pPawn);
+			// get bounding box
+			BBox bbox;
+			if (!GetBoundingBox(pPawn, bbox))
+				continue;
 
-		if (C::Get<bool>(esp_armor))
-			DrawPlayerArmor(bbox, pPawn);
+			// draw features based on config
+			if (C::Get<bool>(esp_box))
+				DrawPlayerBox(bbox, nTeam);
 
-		if (C::Get<bool>(esp_weapon))
-			DrawPlayerWeapon(bbox, pPawn);
+			if (C::Get<bool>(esp_name))
+				DrawPlayerName(bbox, pController);
 
-		if (C::Get<bool>(esp_skeleton))
-			DrawPlayerSkeleton(pPawn, nTeam);
+			if (C::Get<bool>(esp_health))
+				DrawPlayerHealth(bbox, pPawn);
 
-		if (C::Get<bool>(esp_snaplines))
-			DrawPlayerSnapline(bbox);
+			if (C::Get<bool>(esp_armor))
+				DrawPlayerArmor(bbox, pPawn);
+
+			if (C::Get<bool>(esp_weapon))
+				DrawPlayerWeapon(bbox, pPawn);
+
+			if (C::Get<bool>(esp_skeleton))
+				DrawPlayerSkeleton(pPawn, nTeam);
+
+			if (C::Get<bool>(esp_snaplines))
+				DrawPlayerSnapline(bbox);
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		// silently swallow ESP exceptions to prevent game crash
+		// this can happen if schema offsets are wrong for this game build
 	}
 }
 

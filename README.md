@@ -1,6 +1,6 @@
-# FAGHackCS2
+# GamerHackCS2
 
-**Fully Autonomous Gameplay Hack for Counter-Strike 2** — an internal cheat base implemented as a DLL that is injected into the CS2 process.
+**Internal cheat base for Counter-Strike 2** — implemented as a DLL that is injected into the CS2 process.
 
 > ⚠️ **For educational purposes only.** Using cheats in online games violates the terms of service and may result in permanent bans. This project is intended for studying game internals, reverse engineering techniques, and anti-cheat research.
 
@@ -31,7 +31,7 @@
 | Key      | Action                |
 |----------|-----------------------|
 | `INSERT` | Toggle menu open/close |
-| `END`    | Unload the cheat DLL  |
+| `DELETE` | Unload the cheat DLL  |
 
 ---
 
@@ -87,12 +87,12 @@ The project relies on three external libraries. **They are not included** — yo
 ### Option A: CMake (recommended)
 
 ```powershell
-cd FAGHackCS2
+cd GamerHackCS2
 cmake -B build -A x64
 cmake --build build --config Release
 ```
 
-The output DLL will be in `build/bin/Release/FAGHackCS2.dll`.
+The output DLL will be in `build/bin/Release/GamerHackCS2.dll`.
 
 > **Note:** Before building, uncomment the ImGui and MinHook source file lines in `CMakeLists.txt` once you've placed the real libraries.
 
@@ -119,7 +119,7 @@ The output DLL will be in `build/bin/Release/FAGHackCS2.dll`.
 ## Project Structure
 
 ```
-FAGHackCS2/
+GamerHackCS2/
 ├── CMakeLists.txt                  # CMake build configuration
 ├── README.md                       # This file
 ├── PATTERNS.md                     # Pattern documentation & update guide
@@ -200,7 +200,7 @@ FAGHackCS2/
 2. **Logging** — opens console window and log file
 3. **Interfaces** — captures game interfaces via `CreateInterface` exports and pattern scanning
 4. **Schema** — dumps the game's runtime type system to resolve entity field offsets
-5. **Config** — loads saved settings from `Documents/FAGHack/default.json`
+5. **Config** — loads saved settings from `Documents/GamerHack/default.json`
 6. **Input** — hooks the game window's WndProc for key/mouse input
 7. **Draw** — initializes ImGui with D3D11 backend
 8. **Features** — sets up aimbot, ESP, misc features
@@ -235,16 +235,16 @@ The DLL must be injected into a running `cs2.exe` process. Common methods:
 1. Build in Release x64.
 2. Start CS2 and wait until you reach the main menu.
 3. Use any DLL injector that supports x64.
-4. Inject `FAGHackCS2.dll` into `cs2.exe`.
+4. Inject `GamerHackCS2.dll` into `cs2.exe`.
 5. A console window should appear with initialization logs.
 6. Press `INSERT` to open the menu in-game.
-7. Press `END` to unload cleanly.
+7. Press `DELETE` to unload cleanly.
 
 ---
 
 ## Configuration System
 
-Settings are stored as JSON in `Documents/FAGHack/` (or DLL-relative directory).
+Settings are stored as JSON in `Documents/GamerHack/` (or DLL-relative directory).
 
 - **Auto-save**: Config is automatically saved to `default.json` on unload.
 - **Manual save/load**: Use the config tab in the menu.
