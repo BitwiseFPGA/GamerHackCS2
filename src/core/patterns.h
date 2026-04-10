@@ -167,6 +167,11 @@ namespace PATTERNS {
         // Changed from 'mov rax' (48 8B 05) to 'mov r8' (4C 8B 05) in current CS2 build
         constexpr const char* SET_LOCAL_PLAYER_READY = "48 83 EC ? 4C 8B 05 ? ? ? ? 0F B6 D1";
 
+        // --- Schema System ---
+        // GetAllTypeScope: resolves pointer to array of all CSchemaSystemTypeScope*
+        // Found in schemasystem.dll: mov rax, [rip+X] ... movzx ecx, bx ... mov rdi, [rax+rcx*8]
+        constexpr const char* GET_ALL_TYPE_SCOPE = "48 8B 05 ? ? ? ? 48 8B D6 0F B7 CB 48 8B 3C C8";
+
         // --- CRC Spoofing (SerializePartialToArray) ---
         constexpr const char* SERIALIZE_PARTIAL_TO_ARRAY = "48 89 5C 24 ? 55 56 57 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4";
 

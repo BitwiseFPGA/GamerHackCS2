@@ -3,69 +3,24 @@
 #include "patterns.h"
 #include "../utilities/xorstr.h"
 #include <fstream>
+#include <algorithm>
+#include <string>
+
+using namespace SchemaInternal;
 
 // ============================================================================
-// schema system structures (mirroring game's CSchemaSystem layout)
+// internal storage — three parallel maps for different access patterns
 // ============================================================================
 
-class CSchemaSystemTypeScope;
-
-struct SchemaClassFieldData_t
-{
-	const char* szName;       // 0x00
-	void*       pSchemaType;  // 0x08
-	std::int32_t nSingleInheritanceOffset; // 0x10
-	std::int32_t nMetadataSize;            // 0x14
-	void*        pMetadata;   // 0x18
-};
-
-struct SchemaClassInfoData_t
-{
-	void*                   pVtable;          // 0x00
-	const char*             szName;           // 0x08
-	const char*             szDescription;    // 0x10
-	int                     m_nSize;          // 0x18
-	std::int16_t            nFieldCount;      // 0x1C
-	std::int16_t            nStaticSize;      // 0x1E
-	std::int16_t            nMetadataSize;    // 0x20
-	std::uint8_t            nAlignOf;         // 0x22
-	std::uint8_t            nBaseClassesCount;// 0x23
-	std::uint8_t            _pad2[0x04];      // 0x24
-	SchemaClassFieldData_t* pFields;          // 0x28
-};
-
-class CSchemaSystemTypeScope
-{
-public:
-	const char* GetModuleName()
-	{
-		return reinterpret_cast<const char*>(reinterpret_cast<std::uintptr_t>(this) + 0x08);
-	}
-
-	SchemaClassInfoData_t* FindDeclaredClass(const char* szClassName)
-	{
-		SchemaClassInfoData_t* pResult = nullptr;
-		using Fn = void(__thiscall*)(void*, SchemaClassInfoData_t**, const char*);
-		const auto pVTable = *reinterpret_cast<std::uintptr_t**>(this);
-		reinterpret_cast<Fn>(pVTable[2])(this, &pResult, szClassName);
-		return pResult;
-	}
-};
-
-namespace SchemaVFuncs
-{
-	inline constexpr std::size_t FIND_TYPE_SCOPE_FOR_MODULE = PATTERNS::VTABLE::SCHEMA::FIND_TYPE_SCOPE;
-}
-
-// ============================================================================
-// internal storage
-// ============================================================================
-
-// flat combined-hash -> offset (for "ClassName->fieldName" single-hash lookups)
+// flat combined-hash -> offset: Hash("ClassName->fieldName") → offset
+// used by entity.h SCHEMA_FIELD macros
 static std::unordered_map<FNV1A_t, std::uint32_t> s_mapFlatOffsets;
 
-// classHash -> (fieldHash -> offset)
-static std::unordered_map<FNV1A_t, std::unordered_map<FNV1A_t, std::uint32_t>> s_mapSchemaOffsets;
+// nested hash map: Hash(className) → { Hash(fieldName) → offset }
+static std::unordered_map<FNV1A_t, std::unordered_map<FNV1A_t, std::uint32_t>> s_mapHashOffsets;
+
+// string-based map: className → { fieldName → offset } (Andromeda-style, for debug)
+static std::unordered_map<std::string, std::unordered_map<std::string, std::uint32_t>> s_mapStringOffsets;
 
 struct DebugFieldInfo_t
 {
@@ -80,7 +35,7 @@ static std::size_t s_nTotalFields  = 0;
 
 // ============================================================================
 // HARDCODED FALLBACK OFFSETS — from a2x/cs2-dumper
-// Used when runtime schema dump fails. Must be updated per game build.
+// Used when runtime schema dump fails or as gap-filler.
 // ============================================================================
 struct FallbackOffset_t
 {
@@ -223,7 +178,7 @@ static constexpr FallbackOffset_t s_arrFallbackOffsets[] =
 	{"C_CSPlayerPawn->m_ArmorValue", 0x272C},
 	{"C_CSPlayerPawn->m_bGunGameImmunity", 0x3D74},
 	{"C_CSPlayerPawn->m_angEyeAngles", 0x3DD0},
-	{"C_CSPlayerPawn->m_nSurvivalTeam", 0x26E0}, // approximate
+	{"C_CSPlayerPawn->m_nSurvivalTeam", 0x26E0},
 
 	// C_EconItemView
 	{"C_EconItemView->m_iItemDefinitionIndex", 0x1BA},
@@ -268,20 +223,8 @@ static constexpr FallbackOffset_t s_arrFallbackOffsets[] =
 };
 
 // ============================================================================
-// internal helpers
+// helpers
 // ============================================================================
-
-static CSchemaSystemTypeScope* FindTypeScopeForModule(const char* szModuleName)
-{
-	if (!I::SchemaSystem)
-		return nullptr;
-
-	using FindTypeScopeFn = CSchemaSystemTypeScope * (__thiscall*)(void*, const char*, void*);
-	const auto pVTable = *reinterpret_cast<std::uintptr_t**>(I::SchemaSystem);
-	const auto fn = reinterpret_cast<FindTypeScopeFn>(pVTable[SchemaVFuncs::FIND_TYPE_SCOPE_FOR_MODULE]);
-
-	return fn(I::SchemaSystem, szModuleName, nullptr);
-}
 
 static bool IsValidReadPtr(const void* ptr)
 {
@@ -297,45 +240,192 @@ static bool IsValidReadPtr(const void* ptr)
 	}
 }
 
-// store a class's fields into the offset maps
-static void StoreClassFields(SchemaClassInfoData_t* pClassInfo)
+// Store one class binding's fields into all three maps
+static void StoreBinding(ClassBinding* pBinding)
 {
-	if (!pClassInfo || !pClassInfo->szName)
+	if (!pBinding)
 		return;
 
-	const FNV1A_t nClassHash = FNV1A::Hash(pClassInfo->szName);
-	auto& fieldMap = s_mapSchemaOffsets[nClassHash];
+	const char* szClassName = pBinding->GetName();
+	if (!szClassName || !IsValidReadPtr(szClassName))
+		return;
 
-	if (pClassInfo->nFieldCount > 0 && pClassInfo->pFields)
+	const unsigned short nFieldCount = pBinding->GetDataArraySize();
+	SchemaFieldData_t* pFields = pBinding->GetDataArray();
+	if (nFieldCount == 0 || !pFields || !IsValidReadPtr(pFields))
+		return;
+
+	const FNV1A_t nClassHash = FNV1A::Hash(szClassName);
+	auto& hashFieldMap = s_mapHashOffsets[nClassHash];
+	auto& strFieldMap = s_mapStringOffsets[std::string(szClassName)];
+
+	for (unsigned short f = 0; f < nFieldCount; ++f)
 	{
-		for (std::int16_t f = 0; f < pClassInfo->nFieldCount; ++f)
-		{
-			const auto& field = pClassInfo->pFields[f];
-			if (!field.szName)
-				continue;
+		if (!IsValidReadPtr(&pFields[f]))
+			break;
 
-			const FNV1A_t nFieldHash = FNV1A::Hash(field.szName);
-			const auto nOffset = static_cast<std::uint32_t>(field.nSingleInheritanceOffset);
+		const auto& field = pFields[f];
+		if (!field.FieldName || !IsValidReadPtr(field.FieldName))
+			continue;
 
-			fieldMap[nFieldHash] = nOffset;
+		const auto nOffset = static_cast<std::uint32_t>(field.FieldOffset);
+		const FNV1A_t nFieldHash = FNV1A::Hash(field.FieldName);
 
-			std::string combined = std::string(pClassInfo->szName) + "->" + field.szName;
-			s_mapFlatOffsets[FNV1A::Hash(combined.c_str())] = nOffset;
+		// nested hash map
+		hashFieldMap[nFieldHash] = nOffset;
 
-			++s_nTotalFields;
+		// flat combined-hash map (for entity.h macros)
+		std::string combined = std::string(szClassName) + "->" + field.FieldName;
+		s_mapFlatOffsets[FNV1A::Hash(combined.c_str())] = nOffset;
 
-			s_vecDebugFields.push_back({
-				pClassInfo->szName,
-				field.szName,
-				nOffset
-			});
-		}
+		// string map
+		strFieldMap[std::string(field.FieldName)] = nOffset;
+
+		++s_nTotalFields;
+
+		DebugFieldInfo_t dbg;
+		dbg.szClassName = szClassName;
+		dbg.szFieldName = field.FieldName;
+		dbg.nOffset = nOffset;
+		s_vecDebugFields.push_back(dbg);
 	}
 
 	++s_nTotalClasses;
 }
 
-// All class names we need offsets for — used by direct FindDeclaredClass approach
+// SEH-safe wrapper to read NumSchema
+static int SafeGetNumSchema(SchemaList<ClassBinding>* pContainer)
+{
+	__try
+	{
+		return pContainer->GetNumSchema();
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return -1;
+	}
+}
+
+// SEH-safe wrapper to iterate hash table buckets
+static int SafeIterateBuckets(SchemaList<ClassBinding>* pContainer, int nNumSchema)
+{
+	int nBlockIndex = 0;
+	int nFound = 0;
+
+	__try
+	{
+		const auto& containers = pContainer->GetBlockContainers();
+
+		for (const auto& bucket : containers)
+		{
+			for (auto* pBlock = bucket.GetFirstBlock();
+				pBlock && nBlockIndex < nNumSchema;
+				pBlock = pBlock->Next(), ++nBlockIndex)
+			{
+				auto* pBinding = pBlock->GetBinding();
+				if (!pBinding || !IsValidReadPtr(pBinding))
+					continue;
+
+				StoreBinding(pBinding);
+				++nFound;
+			}
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		// iteration crashed
+	}
+
+	return nFound;
+}
+
+// ============================================================================
+// Andromeda-style: iterate 256-bucket hash table for a type scope
+// ============================================================================
+static int IterateHashTable(TypeScope* pScope)
+{
+	if (!pScope)
+		return 0;
+
+	auto* pClassContainer = pScope->GetClassContainer();
+	if (!pClassContainer || !IsValidReadPtr(pClassContainer))
+		return 0;
+
+	int nNumSchema = SafeGetNumSchema(pClassContainer);
+	if (nNumSchema < 0)
+		return 0;
+
+	if (nNumSchema == 0 || nNumSchema > 100000)
+	{
+		L_PRINT(LOG_WARNING) << _XS("  hash table NumSchema=") << nNumSchema << _XS(" — skipping");
+		return 0;
+	}
+
+	L_PRINT(LOG_INFO) << _XS("  hash table reports ") << nNumSchema << _XS(" classes");
+
+	int nFound = SafeIterateBuckets(pClassContainer, nNumSchema);
+	if (nFound == 0)
+		L_PRINT(LOG_WARNING) << _XS("  hash table iteration found 0 bindings");
+
+	return nFound;
+}
+
+// ============================================================================
+// Get GlobalTypeScope via VMT index 11
+// ============================================================================
+static TypeScope* GetGlobalTypeScope()
+{
+	if (!I::SchemaSystem)
+		return nullptr;
+
+	using Fn = TypeScope*(__thiscall*)(void*);
+	const auto pVTable = *reinterpret_cast<std::uintptr_t**>(I::SchemaSystem);
+	return reinterpret_cast<Fn>(pVTable[PATTERNS::VTABLE::SCHEMA::GLOBAL_TYPE_SCOPE])(I::SchemaSystem);
+}
+
+// ============================================================================
+// Get all type scopes via pattern (Andromeda approach)
+// ============================================================================
+static TypeScope** GetAllTypeScopes(std::uint16_t& outCount)
+{
+	outCount = 0;
+
+	// scan for the GetAllTypeScope pattern in schemasystem.dll
+	const std::uintptr_t uPatternAddr = MEM::FindPattern(
+		PATTERNS::MODULES::SCHEMASYSTEM,
+		PATTERNS::FUNCTIONS::GET_ALL_TYPE_SCOPE,
+		MEM::ESearchType::PTR);
+
+	if (!uPatternAddr)
+	{
+		L_PRINT(LOG_WARNING) << _XS("GetAllTypeScope pattern not found");
+		return nullptr;
+	}
+
+	// the scope count is stored 8 bytes before the resolved pointer
+	auto** ppScopes = *reinterpret_cast<TypeScope***>(uPatternAddr);
+	outCount = *reinterpret_cast<std::uint16_t*>(uPatternAddr - 0x8);
+
+	L_PRINT(LOG_INFO) << _XS("GetAllTypeScope: ") << outCount << _XS(" scopes at ") << ppScopes;
+	return ppScopes;
+}
+
+// ============================================================================
+// FindTypeScopeForModule via VMT (fallback if hash table fails)
+// ============================================================================
+static TypeScope* FindTypeScopeForModule(const char* szModuleName)
+{
+	if (!I::SchemaSystem)
+		return nullptr;
+
+	using Fn = TypeScope*(__thiscall*)(void*, const char*, void*);
+	const auto pVTable = *reinterpret_cast<std::uintptr_t**>(I::SchemaSystem);
+	return reinterpret_cast<Fn>(pVTable[PATTERNS::VTABLE::SCHEMA::FIND_TYPE_SCOPE])(I::SchemaSystem, szModuleName, nullptr);
+}
+
+// ============================================================================
+// DirectLookupClasses — fallback: call FindDeclaredClass per known class
+// ============================================================================
 static const char* s_arrRequiredClasses[] =
 {
 	"CEntityInstance", "CEntityIdentity",
@@ -343,8 +433,7 @@ static const char* s_arrRequiredClasses[] =
 	"CCollisionProperty", "CGlowProperty",
 	"EntitySpottedState_t",
 	"C_BaseEntity", "C_BaseModelEntity", "CBaseAnimGraph",
-	"C_BaseFlex",
-	"C_PostProcessingVolume",
+	"C_BaseFlex", "C_PostProcessingVolume",
 	"C_BaseToggle", "C_BaseTrigger",
 	"C_BaseViewModel", "C_PredictedViewModel", "C_CSGOViewModel",
 	"CBasePlayerController", "CCSPlayerController",
@@ -365,43 +454,92 @@ static const char* s_arrRequiredClasses[] =
 	"C_BasePlayerWeapon", "C_CSWeaponBase", "C_CSWeaponBaseGun",
 	"C_BaseCSGrenade", "C_BaseGrenade",
 	"C_BaseCSGrenadeProjectile", "C_SmokeGrenadeProjectile",
-	"C_C4", "C_PlantedC4",
-	"C_EnvSky",
+	"C_C4", "C_PlantedC4", "C_EnvSky",
 };
 
-// Direct lookup approach: call FindDeclaredClass for each known class name
-// This bypasses the CUtlTSHash iteration entirely and is more reliable
-static int DirectLookupClasses(CSchemaSystemTypeScope* pScope)
+// Use the old SchemaClassInfoData_t layout for FindDeclaredClass results
+struct LegacySchemaClassInfo_t
 {
-	if (!pScope)
-		return 0;
+	void*            pVtable;       // 0x00
+	const char*      szName;        // 0x08
+	const char*      szDescription; // 0x10
+	int              m_nSize;       // 0x18
+	std::int16_t     nFieldCount;   // 0x1C
+	std::int16_t     _pad1e;        // 0x1E
+	std::int16_t     _pad20;        // 0x20
+	std::uint8_t     _pad22;        // 0x22
+	std::uint8_t     _pad23;        // 0x23
+	std::uint8_t     _pad24[0x04];  // 0x24
+	SchemaFieldData_t* pFields;     // 0x28 — same layout as Andromeda's DataArray
+};
 
+// SEH-safe wrapper: calls FindDeclaredClass without C++ objects in scope
+static void* SafeFindDeclaredClass(TypeScope* pScope, const char* szClassName)
+{
+	__try
+	{
+		return pScope->FindDeclaredClass(szClassName);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return nullptr;
+	}
+}
+
+static int DirectLookupClasses(TypeScope* pScope)
+{
+	if (!pScope) return 0;
 	int nFound = 0;
 
 	for (const auto* szClassName : s_arrRequiredClasses)
 	{
-		__try
+		auto* pInfo = reinterpret_cast<LegacySchemaClassInfo_t*>(
+			SafeFindDeclaredClass(pScope, szClassName));
+		if (!pInfo || !IsValidReadPtr(pInfo) || !pInfo->szName || pInfo->nFieldCount <= 0 || !pInfo->pFields)
+			continue;
+
+		const FNV1A_t nClassHash = FNV1A::Hash(szClassName);
+		auto& hashFieldMap = s_mapHashOffsets[nClassHash];
+		auto& strFieldMap = s_mapStringOffsets[std::string(szClassName)];
+
+		for (std::int16_t f = 0; f < pInfo->nFieldCount; ++f)
 		{
-			SchemaClassInfoData_t* pClassInfo = pScope->FindDeclaredClass(szClassName);
-			if (pClassInfo && pClassInfo->szName && pClassInfo->nFieldCount > 0)
-			{
-				StoreClassFields(pClassInfo);
-				++nFound;
-			}
+			if (!IsValidReadPtr(&pInfo->pFields[f]))
+				break;
+
+			const auto& field = pInfo->pFields[f];
+			if (!field.FieldName || !IsValidReadPtr(field.FieldName))
+				continue;
+
+			const auto nOffset = static_cast<std::uint32_t>(field.FieldOffset);
+			const FNV1A_t nFieldHash = FNV1A::Hash(field.FieldName);
+
+			hashFieldMap[nFieldHash] = nOffset;
+			strFieldMap[std::string(field.FieldName)] = nOffset;
+
+			std::string combined = std::string(szClassName) + "->" + field.FieldName;
+			s_mapFlatOffsets[FNV1A::Hash(combined.c_str())] = nOffset;
+
+			++s_nTotalFields;
+
+			DebugFieldInfo_t dbg;
+			dbg.szClassName = szClassName;
+			dbg.szFieldName = field.FieldName;
+			dbg.nOffset = nOffset;
+			s_vecDebugFields.push_back(dbg);
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			// skip this class if SEH fires
-		}
+
+		++s_nTotalClasses;
+		++nFound;
 	}
 
 	return nFound;
 }
 
-// load hardcoded fallback offsets into the flat map
+// load hardcoded fallback offsets
 static void LoadFallbackOffsets()
 {
-	L_PRINT(LOG_WARNING) << _XS("loading hardcoded fallback offsets (schema dump failed)");
+	L_PRINT(LOG_WARNING) << _XS("loading hardcoded fallback offsets");
 
 	for (const auto& entry : s_arrFallbackOffsets)
 	{
@@ -416,89 +554,157 @@ static void LoadFallbackOffsets()
 	L_PRINT(LOG_INFO) << _XS("loaded ") << s_nTotalFields << _XS(" fallback offsets");
 }
 
+// merge fallback offsets for any gaps
+static std::size_t MergeFallbackOffsets()
+{
+	std::size_t nMerged = 0;
+	for (const auto& entry : s_arrFallbackOffsets)
+	{
+		const FNV1A_t nHash = FNV1A::Hash(entry.szCombined);
+		if (s_mapFlatOffsets.find(nHash) == s_mapFlatOffsets.end())
+		{
+			s_mapFlatOffsets[nHash] = entry.nOffset;
+			++nMerged;
+		}
+	}
+	return nMerged;
+}
+
 // ============================================================================
 // public API
 // ============================================================================
 
 bool SCHEMA::Setup()
 {
-	L_PRINT(LOG_INFO) << _XS("--- dumping schema system ---");
+	L_PRINT(LOG_INFO) << _XS("--- dumping schema system (Andromeda-style) ---");
 
 	if (!I::SchemaSystem)
 	{
-		L_PRINT(LOG_ERROR) << _XS("ISchemaSystem is null, cannot dump schemas");
+		L_PRINT(LOG_ERROR) << _XS("ISchemaSystem is null");
 		LoadFallbackOffsets();
 		return true;
 	}
 
-	s_mapSchemaOffsets.clear();
 	s_mapFlatOffsets.clear();
+	s_mapHashOffsets.clear();
+	s_mapStringOffsets.clear();
 	s_vecDebugFields.clear();
 	s_nTotalClasses = 0;
 	s_nTotalFields  = 0;
 
-	// dump schemas from primary game modules using direct FindDeclaredClass
-	const char* arrModules[] = {
-		PATTERNS::MODULES::CLIENT,
-		PATTERNS::MODULES::ENGINE2,
-		PATTERNS::MODULES::SCHEMASYSTEM
-	};
+	// ---- Phase 1: Andromeda approach — collect all type scopes and iterate hash tables ----
+	std::vector<TypeScope*> vecScopes;
 
-	for (const auto* szModule : arrModules)
+	// 1a. GlobalTypeScope via VMT[11]
+	TypeScope* pGlobalScope = GetGlobalTypeScope();
+	if (pGlobalScope)
 	{
-		DumpModule(szModule);
+		L_PRINT(LOG_INFO) << _XS("GlobalTypeScope = ") << static_cast<void*>(pGlobalScope);
+		vecScopes.push_back(pGlobalScope);
+	}
+	else
+	{
+		L_PRINT(LOG_WARNING) << _XS("GlobalTypeScope returned null");
 	}
 
-	L_PRINT(LOG_INFO) << _XS("schema dump complete: ") << s_nTotalClasses << _XS(" classes, ")
+	// 1b. GetAllTypeScope via pattern
+	std::uint16_t nScopeCount = 0;
+	TypeScope** ppAllScopes = GetAllTypeScopes(nScopeCount);
+	if (ppAllScopes && nScopeCount > 0)
+	{
+		for (std::uint16_t i = 0; i < nScopeCount; ++i)
+		{
+			if (ppAllScopes[i])
+			{
+				// avoid duplicates
+				bool bDupe = false;
+				for (const auto* pExisting : vecScopes)
+				{
+					if (pExisting == ppAllScopes[i]) { bDupe = true; break; }
+				}
+				if (!bDupe)
+					vecScopes.push_back(ppAllScopes[i]);
+			}
+		}
+	}
+
+	L_PRINT(LOG_INFO) << _XS("total type scopes to iterate: ") << vecScopes.size();
+
+	// 1c. Iterate hash tables for all scopes
+	int nHashTableTotal = 0;
+	for (auto* pScope : vecScopes)
+	{
+		const char* szModName = nullptr;
+		if (IsValidReadPtr(pScope))
+			szModName = pScope->GetModuleName();
+
+		if (szModName && IsValidReadPtr(szModName))
+			L_PRINT(LOG_INFO) << _XS("iterating scope: ") << szModName;
+		else
+			L_PRINT(LOG_INFO) << _XS("iterating scope: ") << static_cast<void*>(pScope);
+
+		int nFound = IterateHashTable(pScope);
+		nHashTableTotal += nFound;
+	}
+
+	L_PRINT(LOG_INFO) << _XS("hash table iteration: ") << nHashTableTotal << _XS(" classes, ")
 		<< s_nTotalFields << _XS(" fields");
 
+	// ---- Phase 2: Fallback — direct FindDeclaredClass if hash table got nothing ----
 	if (s_nTotalFields == 0)
 	{
-		L_PRINT(LOG_WARNING) << _XS("runtime schema dump found 0 fields, loading fallbacks");
+		L_PRINT(LOG_WARNING) << _XS("hash table iteration yielded 0 fields, trying direct lookup...");
+
+		const char* arrModules[] = {
+			PATTERNS::MODULES::CLIENT,
+			PATTERNS::MODULES::ENGINE2,
+			PATTERNS::MODULES::SCHEMASYSTEM
+		};
+
+		int nDirectTotal = 0;
+		for (const auto* szModule : arrModules)
+		{
+			TypeScope* pScope = FindTypeScopeForModule(szModule);
+			if (pScope)
+			{
+				int nFound = DirectLookupClasses(pScope);
+				L_PRINT(LOG_INFO) << _XS("  direct lookup in ") << szModule << _XS(": ") << nFound << _XS(" classes");
+				nDirectTotal += nFound;
+			}
+		}
+
+		L_PRINT(LOG_INFO) << _XS("direct lookup total: ") << nDirectTotal << _XS(" classes, ")
+			<< s_nTotalFields << _XS(" fields");
+	}
+
+	// ---- Phase 3: Hardcoded fallbacks ----
+	if (s_nTotalFields == 0)
+	{
 		LoadFallbackOffsets();
 	}
 	else
 	{
-		// merge fallback offsets for any fields that the runtime dump missed
-		std::size_t nMerged = 0;
-		for (const auto& entry : s_arrFallbackOffsets)
-		{
-			const FNV1A_t nHash = FNV1A::Hash(entry.szCombined);
-			if (s_mapFlatOffsets.find(nHash) == s_mapFlatOffsets.end())
-			{
-				s_mapFlatOffsets[nHash] = entry.nOffset;
-				++nMerged;
-			}
-		}
+		std::size_t nMerged = MergeFallbackOffsets();
 		if (nMerged > 0)
 			L_PRINT(LOG_INFO) << _XS("merged ") << nMerged << _XS(" fallback offsets for missing fields");
 	}
+
+	L_PRINT(LOG_INFO) << _XS("schema dump complete: ") << s_nTotalClasses << _XS(" classes, ")
+		<< s_nTotalFields << _XS(" fields total");
 
 	return true;
 }
 
 void SCHEMA::Destroy()
 {
-	s_mapSchemaOffsets.clear();
 	s_mapFlatOffsets.clear();
+	s_mapHashOffsets.clear();
+	s_mapStringOffsets.clear();
 	s_vecDebugFields.clear();
 	s_nTotalClasses = 0;
 	s_nTotalFields  = 0;
 
 	L_PRINT(LOG_INFO) << _XS("schema data cleared");
-}
-
-std::uint32_t SCHEMA::GetOffset(FNV1A_t nClassHash, FNV1A_t nFieldHash)
-{
-	const auto itClass = s_mapSchemaOffsets.find(nClassHash);
-	if (itClass == s_mapSchemaOffsets.end())
-		return 0;
-
-	const auto itField = itClass->second.find(nFieldHash);
-	if (itField == itClass->second.end())
-		return 0;
-
-	return itField->second;
 }
 
 std::uint32_t SCHEMA::GetOffset(FNV1A_t nCombinedHash)
@@ -509,25 +715,30 @@ std::uint32_t SCHEMA::GetOffset(FNV1A_t nCombinedHash)
 	return it->second;
 }
 
-bool SCHEMA::DumpModule(const char* szModuleName)
+std::uint32_t SCHEMA::GetOffset(FNV1A_t nClassHash, FNV1A_t nFieldHash)
 {
-	L_PRINT(LOG_INFO) << _XS("dumping schemas from: ") << szModuleName;
-
-	CSchemaSystemTypeScope* pScope = FindTypeScopeForModule(szModuleName);
-	if (!pScope)
-	{
-		L_PRINT(LOG_WARNING) << _XS("  failed to find type scope for ") << szModuleName;
-		return false;
-	}
-
-	L_PRINT(LOG_INFO) << _XS("  type scope = ") << static_cast<const void*>(pScope);
-
-	// use direct FindDeclaredClass lookup (bypasses CUtlTSHash iteration issues)
-	int nFound = DirectLookupClasses(pScope);
-	L_PRINT(LOG_INFO) << _XS("  found ") << nFound << _XS(" classes via direct lookup in ") << szModuleName;
-
-	return nFound > 0;
+	const auto itClass = s_mapHashOffsets.find(nClassHash);
+	if (itClass == s_mapHashOffsets.end())
+		return 0;
+	const auto itField = itClass->second.find(nFieldHash);
+	if (itField == itClass->second.end())
+		return 0;
+	return itField->second;
 }
+
+std::uint32_t SCHEMA::GetOffset(const char* szClassName, const char* szFieldName)
+{
+	const auto itClass = s_mapStringOffsets.find(szClassName);
+	if (itClass == s_mapStringOffsets.end())
+		return 0;
+	const auto itField = itClass->second.find(szFieldName);
+	if (itField == itClass->second.end())
+		return 0;
+	return itField->second;
+}
+
+std::size_t SCHEMA::GetTotalClasses() { return s_nTotalClasses; }
+std::size_t SCHEMA::GetTotalFields()  { return s_nTotalFields; }
 
 void SCHEMA::DumpToFile(const char* szFilePath)
 {
