@@ -3,6 +3,7 @@
 #include "interfaces/igameresourceservice.h"
 #include "interfaces/iengineclient.h"
 #include "interfaces/ischemasystem.h"
+#include "functionlist.h"
 
 // ---------------------------------------------------------------
 // placeholder empty vector for null-safe origin returns
@@ -100,6 +101,32 @@ const Vector3& C_BaseEntity::GetOrigin()
 	return GetSceneOrigin();
 }
 
+bool CGameSceneNode::GetBonePosition(std::int32_t nBoneIndex, Vector3& vecBonePos)
+{
+	CSkeletonInstance* pSkeleton = GetSkeletonInstance();
+	if (!pSkeleton || nBoneIndex < 0)
+		return false;
+
+	const int nBoneCount = pSkeleton->GetBoneCount();
+	if (nBoneIndex >= nBoneCount)
+		return false;
+
+	if (Matrix2x4* pBoneCache = pSkeleton->GetBoneCache(); pBoneCache != nullptr)
+	{
+		vecBonePos = pBoneCache->GetOrigin(nBoneIndex);
+		if (!vecBonePos.IsZero())
+			return true;
+	}
+
+	CModelState& modelState = pSkeleton->GetModelState();
+	CBoneData* pBones = modelState.m_pBones;
+	if (!pBones)
+		return false;
+
+	vecBonePos = pBones[nBoneIndex].position;
+	return !vecBonePos.IsZero();
+}
+
 bool C_BaseEntity::GetBoundingBox(Vector3& vecMins, Vector3& vecMaxs)
 {
 	CCollisionProperty* pCollision = GetCollision();
@@ -114,15 +141,20 @@ bool C_BaseEntity::GetBoundingBox(Vector3& vecMins, Vector3& vecMaxs)
 
 bool C_BaseEntity::ComputeHitboxSurroundingBox(Vector3* pMins, Vector3* pMaxs)
 {
-	// uses pattern-resolved function if available, otherwise falls back to collision
 	if (!pMins || !pMaxs)
 		return false;
+
+	if (SDK_FUNC::ComputeHitboxSurroundingBox)
+		return SDK_FUNC::ComputeHitboxSurroundingBox(this, pMins, pMaxs);
 
 	return GetBoundingBox(*pMins, *pMaxs);
 }
 
 int C_BaseEntity::GetBoneIdByName(const char* szName)
 {
+	if (SDK_FUNC::GetBoneIdByName && szName && szName[0] != '\0')
+		return SDK_FUNC::GetBoneIdByName(this, szName);
+
 	CGameSceneNode* pGameSceneNode = GetGameSceneNode();
 	if (!pGameSceneNode)
 		return -1;

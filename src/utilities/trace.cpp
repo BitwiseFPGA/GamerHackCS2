@@ -1,6 +1,7 @@
 #include "trace.h"
 
 #include "../core/interfaces.h"
+#include "bones.h"
 #include "log.h"
 #include "memory.h"
 #include "xorstr.h"
@@ -66,8 +67,10 @@ bool TRACE::IsBoneVisible(C_CSPlayerPawn* pLocalPawn, C_CSPlayerPawn* pTargetPaw
 	if (!pSkeleton)
 		return false;
 
-	Vector3 vecBonePos = pSkeleton->GetBonePosition(nBoneIndex);
-	if (vecBonePos.IsZero())
+	BONES::CalcWorldSpaceBones(pSkeleton, 0xFFFFF);
+
+	Vector3 vecBonePos;
+	if (!pSceneNode->GetBonePosition(nBoneIndex, vecBonePos) || vecBonePos.IsZero())
 		return false;
 
 	if (pOutBonePos)
@@ -84,7 +87,7 @@ bool TRACE::IsPlayerVisible(C_CSPlayerPawn* pLocalPawn, CCSPlayerController* pTa
 	if (!pLocalPawn || !pTargetController || !I::GameEntitySystem)
 		return false;
 
-	auto* pTargetPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pTargetController->GetPawnHandle());
+	auto* pTargetPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pTargetController->GetPlayerPawnHandle());
 	if (!pTargetPawn)
 		return false;
 

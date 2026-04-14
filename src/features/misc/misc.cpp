@@ -15,6 +15,7 @@
 #include "../../sdk/const.h"
 
 #include "../../sdk/common.h"
+#include "../../sdk/functionlist.h"
 
 #include <cstdio>
 #include <cmath>
@@ -49,54 +50,81 @@ void F::MISC::OnCreateMove(CCSGOInput* pInput, CUserCmd* pCmd)
 	if (!I::Engine || !I::Engine->IsInGame())
 		return;
 
-	if (!I::GameEntitySystem)
+	if (!I::GameEntitySystem || !pInput || !pCmd)
 		return;
 
-	// get local pawn
-	const int nLocalIndex = I::Engine->GetLocalPlayer();
-	auto* pLocalController = I::GameEntitySystem->Get<CCSPlayerController>(nLocalIndex);
-	if (!pLocalController)
+	// check if any CreateMove feature is enabled before touching entities
+	const bool bNeedsPawn = C::Get<bool>(misc_bhop) || C::Get<bool>(misc_autostrafe);
+	const bool bNeedsInput = C::Get<bool>(misc_thirdperson);
+
+	if (!bNeedsPawn && !bNeedsInput)
 		return;
 
-	auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPawnHandle());
-	if (!pLocalPawn || !pLocalPawn->IsAlive())
-		return;
-
-	const int nFlags = pLocalPawn->GetFlags();
-
-	// --- Bunny Hop ---
-	if (C::Get<bool>(misc_bhop))
+	__try
 	{
-		// if user is holding jump but NOT on the ground, suppress jump
-		// this causes jump to fire instantly when touching ground
-		if (pCmd->nButtons.nValue & IN_JUMP)
+		auto* pLocalController = SDK_FUNC::GetLocalPlayerController ?
+			SDK_FUNC::GetLocalPlayerController(-1) : nullptr;
+		if (!pLocalController)
+			return;
+
+		// thirdperson only needs CCSGOInput, not pawn
+		if (bNeedsInput && !bNeedsPawn)
 		{
-			if (!(nFlags & FL_ONGROUND))
-				pCmd->nButtons.nValue &= ~IN_JUMP;
+			if (C::Get<bool>(misc_thirdperson))
+				pInput->bInThirdPerson = true;
+			return;
 		}
-	}
 
-	// --- Auto Strafe ---
-	if (C::Get<bool>(misc_autostrafe))
-	{
-		if (!(nFlags & FL_ONGROUND))
+		if (!pLocalController->IsPawnAlive())
+			return;
+
+		auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPlayerPawnHandle());
+		if (!pLocalPawn || !pLocalPawn->IsAlive())
+			return;
+
+		// --- Bunny Hop ---
+		if (C::Get<bool>(misc_bhop))
 		{
-			auto* pBaseCmd = pCmd->csgoUserCmd.pBaseCmd;
-			if (pBaseCmd)
+			const int nFlags = pLocalPawn->GetFlags();
+			if (pCmd->nButtons.nValue & IN_JUMP)
 			{
-				if (pBaseCmd->nMousedX > 0)
-					pBaseCmd->flSideMove = 1.0f;
-				else if (pBaseCmd->nMousedX < 0)
-					pBaseCmd->flSideMove = -1.0f;
+				if (!(nFlags & FL_ONGROUND))
+					pCmd->nButtons.nValue &= ~IN_JUMP;
 			}
 		}
-	}
 
-	// --- Third Person (toggle via input) ---
-	if (C::Get<bool>(misc_thirdperson))
-		pInput->bInThirdPerson = true;
-	else
-		pInput->bInThirdPerson = false;
+		// --- Auto Strafe ---
+		if (C::Get<bool>(misc_autostrafe))
+		{
+			const int nFlags = pLocalPawn->GetFlags();
+			if (!(nFlags & FL_ONGROUND))
+			{
+				auto* pBaseCmd = pCmd->csgoUserCmd.pBaseCmd;
+				if (pBaseCmd)
+				{
+					if (pBaseCmd->nMousedX > 0)
+						pBaseCmd->flSideMove = 1.0f;
+					else if (pBaseCmd->nMousedX < 0)
+						pBaseCmd->flSideMove = -1.0f;
+				}
+			}
+		}
+
+		// --- Third Person ---
+		if (C::Get<bool>(misc_thirdperson))
+			pInput->bInThirdPerson = true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		static bool bLoggedEx = false;
+		if (!bLoggedEx)
+		{
+			bLoggedEx = true;
+			const DWORD dwCode = GetExceptionCode();
+			L_PRINT(LOG_ERROR) << _XS("[MISC] EXCEPTION in OnCreateMove, code=0x")
+				<< reinterpret_cast<void*>(static_cast<uintptr_t>(dwCode));
+		}
+	}
 }
 
 // ---------------------------------------------------------------
@@ -107,27 +135,43 @@ void F::MISC::OnFrameStageNotify(int nStage)
 	if (nStage != FRAME_NET_UPDATE_POSTDATAUPDATE_END)
 		return;
 
+	// only access entities if noflash is enabled
+	if (!C::Get<bool>(misc_noflash))
+		return;
+
 	if (!I::Engine || !I::Engine->IsInGame())
 		return;
 
 	if (!I::GameEntitySystem)
 		return;
 
-	// get local pawn
-	const int nLocalIndex = I::Engine->GetLocalPlayer();
-	auto* pLocalController = I::GameEntitySystem->Get<CCSPlayerController>(nLocalIndex);
-	if (!pLocalController)
-		return;
-
-	auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPawnHandle());
-	if (!pLocalPawn)
-		return;
-
-	// --- No Flash ---
-	if (C::Get<bool>(misc_noflash))
+	__try
 	{
+		auto* pLocalController = SDK_FUNC::GetLocalPlayerController ?
+			SDK_FUNC::GetLocalPlayerController(-1) : nullptr;
+		if (!pLocalController)
+			return;
+
+		if (!pLocalController->IsPawnAlive())
+			return;
+
+		auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPlayerPawnHandle());
+		if (!pLocalPawn)
+			return;
+
 		float flAlpha = C::Get<float>(misc_noflash_alpha);
 		pLocalPawn->GetFlashMaxAlpha() = flAlpha;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		static bool bLogged = false;
+		if (!bLogged)
+		{
+			bLogged = true;
+			const DWORD dwCode = GetExceptionCode();
+			L_PRINT(LOG_ERROR) << _XS("[MISC] EXCEPTION in OnFrameStageNotify, code=0x")
+				<< reinterpret_cast<void*>(static_cast<uintptr_t>(dwCode));
+		}
 	}
 }
 

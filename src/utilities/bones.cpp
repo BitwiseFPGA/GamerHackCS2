@@ -3,6 +3,7 @@
 #include "memory.h"
 #include "xorstr.h"
 #include "../sdk/entity.h"
+#include "../sdk/functionlist.h"
 
 // ---------------------------------------------------------------
 // GetBonePosition — get world-space bone position by index
@@ -20,10 +21,13 @@ bool BONES::GetBonePosition(C_CSPlayerPawn* pPawn, int nBoneIndex, Vector3& outP
 	if (!pSkeleton)
 		return false;
 
-	if (nBoneIndex < 0 || nBoneIndex >= pSkeleton->GetBoneCount())
+	// force bone recalculation (Andromeda calls CalcWorldSpaceBones before reading)
+	if (SDK_FUNC::CalcWorldSpaceBones)
+		SDK_FUNC::CalcWorldSpaceBones(pSkeleton, 0xFFFFF);
+
+	if (!pSceneNode->GetBonePosition(nBoneIndex, outPos))
 		return false;
 
-	outPos = pSkeleton->GetBonePosition(nBoneIndex);
 	return !outPos.IsZero();
 }
 

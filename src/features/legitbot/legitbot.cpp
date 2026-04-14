@@ -77,69 +77,113 @@ struct AimTarget
 	C_CSPlayerPawn* pPawn = nullptr;
 	Vector3 vecBonePos    = {};
 	float   flFOV         = 999.0f;
+	float   flDistance     = 999999.0f;
+	int     nHealth       = 999;
 };
 
 static bool GetBestTarget(const Vector3& vecEyePos, const QAngle& angView, float flMaxFOV,
 	int nTargetBone, C_CSPlayerPawn* pLocalPawn, AimTarget& bestOut)
 {
-	if (!I::GameEntitySystem || !I::Engine)
+	if (!I::GameEntitySystem)
 		return false;
 
-	const int nLocalIndex = I::Engine->GetLocalPlayer();
-	const int nLocalTeam  = pLocalPawn->GetAssociatedTeam();
+	const int nLocalTeam = static_cast<int>(pLocalPawn->GetTeam());
+	const int nFilter = C::Get<int>(aimbot_target_filter);
 
 	float flBestFOV = flMaxFOV;
+	float flBestDist = 999999.0f;
+	int   nBestHP = 99999;
 	bool bFound = false;
 
 	for (int i = 1; i <= 64; i++)
 	{
-		if (i == nLocalIndex)
-			continue;
-
-		auto* pController = I::GameEntitySystem->Get<CCSPlayerController>(i);
-		if (!pController || !pController->IsPawnAlive())
-			continue;
-
-		auto* pPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pController->GetPawnHandle());
-		if (!pPawn || pPawn == pLocalPawn)
-			continue;
-
-		// skip teammates
-		if (pPawn->GetAssociatedTeam() == nLocalTeam)
-			continue;
-
-		if (!pPawn->IsAlive())
-			continue;
-
-		// skip dormant
-		auto* pSceneNode = pPawn->GetGameSceneNode();
-		if (!pSceneNode || pSceneNode->IsDormant())
-			continue;
-
-		// visible-only check using trace system
-		if (C::Get<bool>(aimbot_visible_only))
+		__try
 		{
-			Vector3 vecLocalEye = pLocalPawn->GetEyePosition();
-			if (!TRACE::IsBoneVisible(pLocalPawn, pPawn, nTargetBone))
+			auto* pController = I::GameEntitySystem->Get<CCSPlayerController>(i);
+			if (!pController || !pController->IsPawnAlive())
 				continue;
+
+			auto* pPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pController->GetPlayerPawnHandle());
+			if (!pPawn || pPawn == pLocalPawn)
+				continue;
+
+			if (static_cast<int>(pPawn->GetTeam()) == nLocalTeam)
+				continue;
+
+			if (!pPawn->IsAlive())
+				continue;
+
+			auto* pSceneNode = pPawn->GetGameSceneNode();
+			if (!pSceneNode)
+				continue;
+
+			if (C::Get<bool>(aimbot_visible_only))
+			{
+				if (!TRACE::IsBoneVisible(pLocalPawn, pPawn, nTargetBone))
+					continue;
+			}
+
+			Vector3 vecBone;
+			if (!GetBonePosition(pPawn, nTargetBone, vecBone))
+				continue;
+
+			QAngle angToTarget = CalcAngle(vecEyePos, vecBone);
+			float flFOV = GetFOVDistance(angView, angToTarget);
+
+			// always check FOV cone first
+			if (flFOV > flMaxFOV)
+				continue;
+
+			bool bBetter = false;
+			switch (nFilter)
+			{
+			default:
+			case 0: // closest angle
+				if (flFOV < flBestFOV)
+				{
+					flBestFOV = flFOV;
+					bBetter = true;
+				}
+				break;
+
+			case 1: // lowest health
+			{
+				int hp = pPawn->GetHealth();
+				if (hp < nBestHP || (hp == nBestHP && flFOV < flBestFOV))
+				{
+					nBestHP = hp;
+					flBestFOV = flFOV;
+					bBetter = true;
+				}
+				break;
+			}
+
+			case 2: // closest distance
+			{
+				Vector3 delta = vecBone - vecEyePos;
+				float dist = std::sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+				if (dist < flBestDist || (dist == flBestDist && flFOV < flBestFOV))
+				{
+					flBestDist = dist;
+					flBestFOV = flFOV;
+					bBetter = true;
+				}
+				break;
+			}
+			}
+
+			if (bBetter)
+			{
+				bestOut.pPawn     = pPawn;
+				bestOut.vecBonePos = vecBone;
+				bestOut.flFOV     = flFOV;
+				bestOut.nHealth   = pPawn->GetHealth();
+				bFound = true;
+			}
 		}
-
-		// get target bone position
-		Vector3 vecBone;
-		if (!GetBonePosition(pPawn, nTargetBone, vecBone))
-			continue;
-
-		// calculate FOV to this target
-		QAngle angToTarget = CalcAngle(vecEyePos, vecBone);
-		float flFOV = GetFOVDistance(angView, angToTarget);
-
-		if (flFOV < flBestFOV)
+		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			flBestFOV = flFOV;
-			bestOut.pPawn     = pPawn;
-			bestOut.vecBonePos = vecBone;
-			bestOut.flFOV     = flFOV;
-			bFound = true;
+			continue;
 		}
 	}
 
@@ -174,43 +218,83 @@ void F::LEGITBOT::OnCreateMove(CCSGOInput* pInput, CUserCmd* pCmd)
 	if (!I::GameEntitySystem)
 		return;
 
-	// check aim key
-	const int nAimKey = C::Get<int>(aimbot_key);
-	if (nAimKey > 0 && !(GetAsyncKeyState(nAimKey) & 0x8000))
-		return;
+	static bool bFirstCall = true;
+	if (bFirstCall)
+	{
+		bFirstCall = false;
+		L_PRINT(LOG_INFO) << _XS("[LEGITBOT] OnCreateMove first call — pInput=") << static_cast<void*>(pInput)
+			<< _XS(" pCmd=") << static_cast<void*>(pCmd);
+	}
 
-	// get local player
-	const int nLocalIndex = I::Engine->GetLocalPlayer();
-	auto* pLocalController = I::GameEntitySystem->Get<CCSPlayerController>(nLocalIndex);
-	if (!pLocalController)
-		return;
+	// check aim key — skip if always-on toggle is set
+	if (!C::Get<bool>(aimbot_always_on))
+	{
+		const int nAimKey = C::Get<int>(aimbot_key);
+		if (nAimKey > 0 && !(GetAsyncKeyState(nAimKey) & 0x8000))
+			return;
+	}
 
-	auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(pLocalController->GetPawnHandle());
-	if (!pLocalPawn || !pLocalPawn->IsAlive())
-		return;
+	__try
+	{
+		// get local player controller via SDK function (Andromeda passes -1 for local)
+		auto* pLocalController = SDK_FUNC::GetLocalPlayerController ?
+			SDK_FUNC::GetLocalPlayerController(-1) : nullptr;
+		if (!pLocalController || !pLocalController->IsPawnAlive())
+			return;
 
-	// eye position = scene origin + view offset
-	Vector3 vecEyePos = pLocalPawn->GetSceneOrigin() + pLocalPawn->GetViewOffset();
+		// Use m_hPlayerPawn (CCSPlayerController-specific) — more reliable than m_hPawn
+		CBaseHandle hPawn = pLocalController->GetPlayerPawnHandle();
+		if (!hPawn.IsValid())
+			return;
 
-	// current view angles
-	QAngle angView = pInput->GetViewAngles();
+		auto* pLocalPawn = I::GameEntitySystem->Get<C_CSPlayerPawn>(hPawn);
+		if (!pLocalPawn || !pLocalPawn->IsAlive())
+			return;
 
-	// find best target
-	const float flMaxFOV    = C::Get<float>(aimbot_fov);
-	const int   nTargetBone = C::Get<int>(aimbot_bone);
-	const float flSmooth    = C::Get<float>(aimbot_smooth);
+		// eye position = scene origin + view offset
+		Vector3 vecEyePos = pLocalPawn->GetSceneOrigin() + pLocalPawn->GetViewOffset();
 
-	AimTarget target;
-	if (!GetBestTarget(vecEyePos, angView, flMaxFOV, nTargetBone, pLocalPawn, target))
-		return;
+		// current view angles
+		QAngle angView = pInput->GetViewAngles();
 
-	// calculate aim angle
-	QAngle angAim = CalcAngle(vecEyePos, target.vecBonePos);
-	angAim.Normalize();
+		// find best target
+		const float flMaxFOV    = C::Get<float>(aimbot_fov);
+		const int   nTargetBone = C::Get<int>(aimbot_bone);
+		const float flSmooth    = C::Get<float>(aimbot_smooth);
 
-	// apply smoothing
-	QAngle angFinal = SmoothAngle(angView, angAim, flSmooth);
+		AimTarget target;
+		if (!GetBestTarget(vecEyePos, angView, flMaxFOV, nTargetBone, pLocalPawn, target))
+			return;
 
-	// set view angles via bypass system (anti-cheat safe)
-	F::BYPASS::SetViewAngles(angFinal, pInput, pCmd);
+		// calculate aim angle
+		QAngle angAim = CalcAngle(vecEyePos, target.vecBonePos);
+
+		// apply recoil compensation
+		if (C::Get<bool>(aimbot_rcs))
+		{
+			QAngle punch = pLocalPawn->GetAimPunchAngle();
+			angAim.x -= punch.x * 2.0f;
+			angAim.y -= punch.y * 2.0f;
+		}
+
+		angAim.Normalize();
+
+		// apply smoothing
+		QAngle angFinal = SmoothAngle(angView, angAim, flSmooth);
+
+		// set view angles via bypass system (anti-cheat safe path)
+		if (pCmd)
+			F::BYPASS::SetViewAngles(angFinal, pInput, pCmd);
+		else
+			pInput->SetViewAngle(angFinal);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		static bool bLoggedEx = false;
+		if (!bLoggedEx)
+		{
+			bLoggedEx = true;
+			L_PRINT(LOG_ERROR) << _XS("[LEGITBOT] EXCEPTION in OnCreateMove — entity access likely failed");
+		}
+	}
 }

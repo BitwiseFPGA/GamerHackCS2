@@ -110,6 +110,42 @@ struct alignas(16) CBoneData
 	Vector3       rotation;
 };
 
+struct alignas(16) QuaternionAligned
+{
+	constexpr QuaternionAligned(float x = 0.0f, float y = 0.0f, float z = 0.0f, float w = 0.0f) :
+		x(x), y(y), z(z), w(w) { }
+
+	[[nodiscard]] Matrix3x4 ToMatrix(const Vector3& vecOrigin = {}) const
+	{
+		Matrix3x4 matOut;
+
+		matOut[0][0] = 1.0f - 2.0f * y * y - 2.0f * z * z;
+		matOut[1][0] = 2.0f * x * y + 2.0f * w * z;
+		matOut[2][0] = 2.0f * x * z - 2.0f * w * y;
+
+		matOut[0][1] = 2.0f * x * y - 2.0f * w * z;
+		matOut[1][1] = 1.0f - 2.0f * x * x - 2.0f * z * z;
+		matOut[2][1] = 2.0f * y * z + 2.0f * w * x;
+
+		matOut[0][2] = 2.0f * x * z + 2.0f * w * y;
+		matOut[1][2] = 2.0f * y * z - 2.0f * w * x;
+		matOut[2][2] = 1.0f - 2.0f * x * x - 2.0f * y * y;
+
+		matOut[0][3] = vecOrigin.x;
+		matOut[1][3] = vecOrigin.y;
+		matOut[2][3] = vecOrigin.z;
+		return matOut;
+	}
+
+	float x, y, z, w;
+};
+
+struct alignas(16) CTransform
+{
+	VectorAligned      vecPosition;
+	QuaternionAligned  quatOrientation;
+};
+
 class CModel
 {
 private:
@@ -236,6 +272,7 @@ public:
 class CGameSceneNode
 {
 public:
+	SCHEMA_FIELD(CTransform, GetNodeToWorld, "CGameSceneNode->m_nodeToWorld");
 	SCHEMA_FIELD(Vector3, GetAbsOrigin, "CGameSceneNode->m_vecAbsOrigin");
 	SCHEMA_FIELD(Vector3, GetRenderOrigin, "CGameSceneNode->m_vRenderOrigin");
 	SCHEMA_FIELD(QAngle, GetAngleRotation, "CGameSceneNode->m_angRotation");
@@ -247,7 +284,7 @@ public:
 
 	CSkeletonInstance* GetSkeletonInstance()
 	{
-		return MEM::CallVFunc<CSkeletonInstance*, 8U>(this);
+		return reinterpret_cast<CSkeletonInstance*>(this);
 	}
 
 	void SetMeshGroupMask(std::uint64_t uMeshGroupMask);
@@ -260,7 +297,14 @@ public:
 class CSkeletonInstance : public CGameSceneNode
 {
 public:
-	OFFSET_FIELD(int, GetBoneCount, 0x1CC);
+	[[nodiscard]] int GetBoneCount()
+	{
+		CStrongHandle<CModel> hModel = GetModelState().GetModel();
+		if (CModel* pModel = static_cast<CModel*>(hModel); pModel && pModel->m_nBoneCount > 0)
+			return static_cast<int>(pModel->m_nBoneCount);
+
+		return *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + 0x1CC);
+	}
 
 	SCHEMA_FIELD(CModelState, GetModelState, "CSkeletonInstance->m_modelState");
 	SCHEMA_FIELD(std::uint8_t, GetHitboxSet, "CSkeletonInstance->m_nHitboxSet");
@@ -273,11 +317,12 @@ public:
 	/// get world-space bone position by index
 	[[nodiscard]] Vector3 GetBonePosition(int nBoneIndex)
 	{
-		Matrix2x4* pCache = GetBoneCache();
-		if (!pCache || nBoneIndex < 0 || nBoneIndex >= GetBoneCount())
+		CBoneData* pBones = GetModelState().m_pBones;
+		const int nBoneCount = GetBoneCount();
+		if (!pBones || nBoneIndex < 0 || nBoneIndex >= nBoneCount)
 			return {};
 
-		return pCache->GetOrigin(nBoneIndex);
+		return pBones[nBoneIndex].position;
 	}
 
 	void CalcWorldSpaceBones(unsigned int nMask);

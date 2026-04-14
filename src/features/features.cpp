@@ -75,23 +75,29 @@ void F::Destroy()
 void F::OnPresent()
 {
 	VISUALS::OnPresent();
+	VISUALS::DrawSniperCrosshair();
+	VISUALS::DrawRadar();
 	MISC::OnPresent();
 }
 
 void F::OnCreateMove(CCSGOInput* pInput, CUserCmd* pCmd)
 {
-	if (!pInput || !pCmd)
+	if (!pInput)
 		return;
 
-	// bypass pre-processing (backup state)
-	BYPASS::PreCreateMove(pInput, pCmd);
-
-	// feature processing
-	LEGITBOT::OnCreateMove(pInput, pCmd);
-	MISC::OnCreateMove(pInput, pCmd);
-
-	// bypass post-processing (apply subticks, restore angles)
-	BYPASS::PostCreateMove(pInput, pCmd);
+	if (pCmd)
+	{
+		// full CUserCmd path — all features
+		BYPASS::PreCreateMove(pInput, pCmd);
+		LEGITBOT::OnCreateMove(pInput, pCmd);
+		MISC::OnCreateMove(pInput, pCmd);
+		BYPASS::PostCreateMove(pInput, pCmd);
+	}
+	else
+	{
+		// no pCmd — still call aimbot with SetViewAngle fallback
+		LEGITBOT::OnCreateMove(pInput, nullptr);
+	}
 }
 
 void F::OnFrameStageNotify(int nStage)

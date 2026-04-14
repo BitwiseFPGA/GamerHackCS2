@@ -14,8 +14,6 @@ bool F::BYPASS::Setup()
 {
 	vecSubTicks.clear();
 	vecSubTicks.reserve(16);
-	bShouldRestoreAngles = false;
-	angBackupViewAngles = {};
 
 	L_PRINT(LOG_INFO) << _XS("[BYPASS] initialized");
 	return true;
@@ -35,9 +33,8 @@ void F::BYPASS::PreCreateMove(CCSGOInput* pInput, CUserCmd* pCmd)
 	if (!pInput || !pCmd)
 		return;
 
-	// backup the original view angles before any feature modifies them
-	angBackupViewAngles = pInput->GetViewAngles();
-	bShouldRestoreAngles = false;
+	static bool bFirstPreCall = false;
+	if (!bFirstPreCall) { bFirstPreCall = true; L_PRINT(LOG_INFO) << _XS("[BYPASS] PreCreateMove first call"); }
 
 	// clear subtick queue for this tick
 	vecSubTicks.clear();
@@ -107,8 +104,6 @@ void F::BYPASS::SetViewAngles(const QAngle& angView, CCSGOInput* pInput, CUserCm
 			pBaseCmd->SetBits(BASE_BITS_VIEWANGLES);
 		}
 	}
-
-	bShouldRestoreAngles = true;
 }
 
 // ---------------------------------------------------------------

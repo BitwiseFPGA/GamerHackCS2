@@ -8,6 +8,7 @@
 #include "../sdk/datatypes/color.h"
 #include "../sdk/common.h"
 
+#include <algorithm>
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -261,9 +262,9 @@ bool MENU::Checkbox(const char* label, bool* value)
 	return ImGui::Checkbox(label, value);
 }
 
-bool MENU::SliderFloat(const char* label, float* value, float min, float max, const char* fmt)
+bool MENU::SliderFloat(const char* label, float* value, float min, float max, const char* fmt, int flags)
 {
-	return ImGui::SliderFloat(label, value, min, max, fmt);
+	return ImGui::SliderFloat(label, value, min, max, fmt, static_cast<ImGuiSliderFlags>(flags));
 }
 
 bool MENU::SliderInt(const char* label, int* value, int min, int max)
@@ -286,6 +287,8 @@ bool MENU::ColorEdit(const char* label, Color* color)
 
 bool MENU::Combo(const char* label, int* value, const char** items, int itemCount)
 {
+	if (value && itemCount > 0)
+		*value = std::clamp(*value, 0, itemCount - 1);
 	return ImGui::Combo(label, value, items, itemCount);
 }
 
@@ -350,7 +353,6 @@ void MENU::Tooltip(const char* text)
 struct TabDef
 {
 	const char* szLabel;
-	const char* szIcon;
 	void (*pRender)();
 };
 
@@ -363,12 +365,12 @@ static void RenderConfigTab();
 static void RenderSettingsTab();
 
 static const TabDef g_tabs[] = {
-	{ "Aimbot",    "[A]", RenderAimbotTab },
-	{ "Visuals",   "[V]", RenderVisualsTab },
-	{ "Misc",      "[M]", RenderMiscTab },
-	{ "Inventory", "[I]", RenderInventoryTab },
-	{ "Config",    "[C]", RenderConfigTab },
-	{ "Settings",  "[S]", RenderSettingsTab },
+	{ "Aimbot",    RenderAimbotTab },
+	{ "Visuals",   RenderVisualsTab },
+	{ "Misc",      RenderMiscTab },
+	{ "Inventory", RenderInventoryTab },
+	{ "Config",    RenderConfigTab },
+	{ "Settings",  RenderSettingsTab },
 };
 static constexpr int TAB_COUNT = sizeof(g_tabs) / sizeof(g_tabs[0]);
 
@@ -383,10 +385,15 @@ static void RenderAimbotTab()
 	{
 		MENU::Separator("Aimbot");
 		MENU::Checkbox("Enable##aim", &C::Get<bool>(aimbot_enabled));
+		MENU::Checkbox("Always On##aim", &C::Get<bool>(aimbot_always_on));
+		MENU::Tooltip("Aim without holding a key");
 
 		ImGui::Spacing();
-		MENU::SliderFloat("FOV", &C::Get<float>(aimbot_fov), 0.0f, 30.0f, "%.1f");
-		MENU::Tooltip("Aimbot field of view cone");
+
+		ImGui::BeginDisabled(!C::Get<bool>(aimbot_enabled));
+
+		MENU::SliderFloat("FOV", &C::Get<float>(aimbot_fov), 0.1f, 180.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+		MENU::Tooltip("Aimbot field of view cone (logarithmic scale)");
 
 		MENU::SliderFloat("Smooth", &C::Get<float>(aimbot_smooth), 0.0f, 20.0f, "%.1f");
 		MENU::Tooltip("Higher = slower aim correction");
@@ -402,9 +409,20 @@ static void RenderAimbotTab()
 			bone = boneLUT[currentSel];
 
 		MENU::Checkbox("Visible Only", &C::Get<bool>(aimbot_visible_only));
+		MENU::Checkbox("Recoil Compensation", &C::Get<bool>(aimbot_rcs));
+		MENU::Tooltip("Compensate for weapon recoil when aiming");
 
+		static const char* filterNames[] = { "Closest Angle", "Lowest Health", "Closest Distance" };
+		MENU::Combo("Target Filter", &C::Get<int>(aimbot_target_filter), filterNames, 3);
+		MENU::Tooltip("How to select which enemy to aim at");
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(C::Get<bool>(aimbot_always_on));
 		ImGui::Text("Aim Key:");
 		MENU::KeyBind("aimkey", &C::Get<int>(aimbot_key));
+		ImGui::EndDisabled();
+
+		ImGui::EndDisabled();
 	}
 	ImGui::EndChild();
 
@@ -421,8 +439,12 @@ static void RenderVisualsTab()
 	{
 		MENU::Separator("ESP");
 		MENU::Checkbox("Enable##esp", &C::Get<bool>(esp_enabled));
+		MENU::Checkbox("Team ESP", &C::Get<bool>(esp_team));
 
 		ImGui::Spacing();
+
+		ImGui::BeginDisabled(!C::Get<bool>(esp_enabled));
+
 		MENU::Checkbox("Box", &C::Get<bool>(esp_box));
 		if (C::Get<bool>(esp_box))
 		{
@@ -434,25 +456,180 @@ static void RenderVisualsTab()
 
 		ImGui::Spacing();
 		MENU::Checkbox("Name", &C::Get<bool>(esp_name));
+		if (C::Get<bool>(esp_name))
+			MENU::ColorEdit("Name Color", &C::Get<Color>(esp_name_color));
 		MENU::Checkbox("Health Bar", &C::Get<bool>(esp_health));
 		MENU::Checkbox("Armor Bar", &C::Get<bool>(esp_armor));
+		if (C::Get<bool>(esp_armor))
+			MENU::ColorEdit("Armor Color", &C::Get<Color>(esp_armor_color));
 		MENU::Checkbox("Weapon", &C::Get<bool>(esp_weapon));
+		if (C::Get<bool>(esp_weapon))
+			MENU::ColorEdit("Weapon Color", &C::Get<Color>(esp_weapon_color));
 		MENU::Checkbox("Skeleton", &C::Get<bool>(esp_skeleton));
+		if (C::Get<bool>(esp_skeleton))
+		{
+			MENU::ColorEdit("T Color##skeleton", &C::Get<Color>(esp_skeleton_color_t));
+			MENU::ColorEdit("CT Color##skeleton", &C::Get<Color>(esp_skeleton_color_ct));
+		}
 		MENU::Checkbox("Snaplines", &C::Get<bool>(esp_snaplines));
+		if (C::Get<bool>(esp_snaplines))
+		{
+			MENU::ColorEdit("T Color##snapline", &C::Get<Color>(esp_snapline_color_t));
+			MENU::ColorEdit("CT Color##snapline", &C::Get<Color>(esp_snapline_color_ct));
+		}
+
+		ImGui::EndDisabled();
 	}
 	ImGui::EndChild();
 
 	ImGui::SameLine();
 
-	// right column
+	// right column — glow + live ESP preview
 	ImGui::BeginChild("##vis_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
 	{
 		MENU::Separator("Glow");
 		MENU::Checkbox("Enable##glow", &C::Get<bool>(glow_enabled));
+		ImGui::BeginDisabled(!C::Get<bool>(glow_enabled));
 		if (C::Get<bool>(glow_enabled))
 		{
 			MENU::ColorEdit("T Color##glow", &C::Get<Color>(glow_color_t));
 			MENU::ColorEdit("CT Color##glow", &C::Get<Color>(glow_color_ct));
+		}
+		ImGui::EndDisabled();
+
+		ImGui::Spacing();
+		MENU::Separator("Preview");
+
+		const float previewW = ImGui::GetContentRegionAvail().x;
+		constexpr float previewH = 150.0f;
+		const ImVec2 previewOrig = ImGui::GetCursorScreenPos();
+		ImGui::Dummy(ImVec2(previewW, previewH));
+
+		ImDrawList* pDraw = ImGui::GetWindowDrawList();
+		pDraw->AddRectFilled(previewOrig, ImVec2(previewOrig.x + previewW, previewOrig.y + previewH),
+			IM_COL32(10, 10, 15, 200), 4.0f);
+		pDraw->AddRect(previewOrig, ImVec2(previewOrig.x + previewW, previewOrig.y + previewH),
+			IM_COL32(40, 40, 55, 180), 4.0f);
+
+		const float flHealthFactor = std::sinf(ImGui::GetTime() * 5.0f) * 0.25f + 0.75f;
+		const float flArmorFactor = std::sinf(ImGui::GetTime() * 3.0f) * 0.2f + 0.55f;
+
+		auto drawPreviewBox = [&](float x1, float y1, float x2, float y2, const Color& colBox)
+		{
+			const ImU32 col = colBox.ToImU32();
+			if (C::Get<int>(esp_box_type) == 1)
+			{
+				const float boxW = x2 - x1;
+				const float boxH = y2 - y1;
+				const float cL = std::min(boxW, boxH) * 0.25f;
+				pDraw->AddLine({ x1, y1 }, { x1 + cL, y1 }, col);
+				pDraw->AddLine({ x1, y1 }, { x1, y1 + cL }, col);
+				pDraw->AddLine({ x2, y1 }, { x2 - cL, y1 }, col);
+				pDraw->AddLine({ x2, y1 }, { x2, y1 + cL }, col);
+				pDraw->AddLine({ x1, y2 }, { x1 + cL, y2 }, col);
+				pDraw->AddLine({ x1, y2 }, { x1, y2 - cL }, col);
+				pDraw->AddLine({ x2, y2 }, { x2 - cL, y2 }, col);
+				pDraw->AddLine({ x2, y2 }, { x2, y2 - cL }, col);
+			}
+			else
+			{
+				pDraw->AddRect({ x1, y1 }, { x2, y2 }, col);
+			}
+		};
+
+		auto drawPreviewEntity = [&](float cx, const char* szName, const char* szWeapon,
+			const Color& colBox, const Color& colSkeleton, const Color& colSnapline)
+		{
+			const float boxH = C::Get<bool>(esp_team) ? 62.0f : 76.0f;
+			const float boxW = boxH * 0.48f;
+			const float y2 = previewOrig.y + previewH - 28.0f;
+			const float y1 = y2 - boxH;
+			const float x1 = cx - boxW * 0.5f;
+			const float x2 = cx + boxW * 0.5f;
+
+			if (C::Get<bool>(esp_snaplines))
+				pDraw->AddLine({ previewOrig.x + previewW * 0.5f, previewOrig.y + previewH - 2.0f },
+					{ cx, y2 }, colSnapline.ToImU32(), 1.0f);
+
+			if (C::Get<bool>(esp_box))
+				drawPreviewBox(x1, y1, x2, y2, colBox);
+
+			if (C::Get<bool>(esp_health))
+			{
+				const float hbX = x1 - 7.0f;
+				const float hbY = y1 + boxH * (1.0f - flHealthFactor);
+				pDraw->AddRectFilled({ hbX, y1 }, { hbX + 4.0f, y2 }, IM_COL32(0, 0, 0, 160), 2.0f);
+				const ImU32 hpColor = IM_COL32(
+					static_cast<int>(255 * (1.0f - flHealthFactor)),
+					static_cast<int>(205 * flHealthFactor), 50, 210);
+				pDraw->AddRectFilled({ hbX, hbY }, { hbX + 4.0f, y2 }, hpColor, 2.0f);
+			}
+
+			if (C::Get<bool>(esp_armor))
+			{
+				const float abX = x2 + 3.0f;
+				const float abY = y1 + boxH * (1.0f - flArmorFactor);
+				pDraw->AddRectFilled({ abX, y1 }, { abX + 4.0f, y2 }, IM_COL32(0, 0, 0, 160), 2.0f);
+				pDraw->AddRectFilled({ abX, abY }, { abX + 4.0f, y2 }, C::Get<Color>(esp_armor_color).ToImU32(), 2.0f);
+			}
+
+			if (C::Get<bool>(esp_skeleton))
+			{
+				const ImU32 boneCol = colSkeleton.ToImU32();
+				const ImVec2 pelvis(cx, y1 + boxH * 0.78f);
+				const ImVec2 chest(cx, y1 + boxH * 0.40f);
+				const ImVec2 head(cx, y1 + boxH * 0.18f);
+				const ImVec2 lShoulder(x1 + boxW * 0.20f, y1 + boxH * 0.42f);
+				const ImVec2 rShoulder(x2 - boxW * 0.20f, y1 + boxH * 0.42f);
+				const ImVec2 lHand(x1 + boxW * 0.05f, y1 + boxH * 0.60f);
+				const ImVec2 rHand(x2 - boxW * 0.05f, y1 + boxH * 0.60f);
+				const ImVec2 lKnee(x1 + boxW * 0.30f, y1 + boxH * 0.92f);
+				const ImVec2 rKnee(x2 - boxW * 0.30f, y1 + boxH * 0.92f);
+				const ImVec2 lFoot(x1 + boxW * 0.18f, y2);
+				const ImVec2 rFoot(x2 - boxW * 0.18f, y2);
+
+				pDraw->AddLine(head, chest, boneCol, 1.5f);
+				pDraw->AddLine(chest, pelvis, boneCol, 1.5f);
+				pDraw->AddLine(chest, lShoulder, boneCol, 1.5f);
+				pDraw->AddLine(lShoulder, lHand, boneCol, 1.5f);
+				pDraw->AddLine(chest, rShoulder, boneCol, 1.5f);
+				pDraw->AddLine(rShoulder, rHand, boneCol, 1.5f);
+				pDraw->AddLine(pelvis, lKnee, boneCol, 1.5f);
+				pDraw->AddLine(lKnee, lFoot, boneCol, 1.5f);
+				pDraw->AddLine(pelvis, rKnee, boneCol, 1.5f);
+				pDraw->AddLine(rKnee, rFoot, boneCol, 1.5f);
+			}
+
+			if (C::Get<bool>(esp_name))
+			{
+				const ImVec2 tSz = ImGui::CalcTextSize(szName);
+				pDraw->AddText({ cx - tSz.x * 0.5f, y1 - tSz.y - 2.0f }, C::Get<Color>(esp_name_color).ToImU32(), szName);
+			}
+
+			if (C::Get<bool>(esp_weapon))
+			{
+				const ImVec2 tSz = ImGui::CalcTextSize(szWeapon);
+				pDraw->AddText({ cx - tSz.x * 0.5f, y2 + 2.0f }, C::Get<Color>(esp_weapon_color).ToImU32(), szWeapon);
+			}
+		};
+
+		if (C::Get<bool>(esp_team))
+		{
+			drawPreviewEntity(previewOrig.x + previewW * 0.32f, "T", "AK-47",
+				C::Get<Color>(esp_box_color_t),
+				C::Get<Color>(esp_skeleton_color_t),
+				C::Get<Color>(esp_snapline_color_t));
+			drawPreviewEntity(previewOrig.x + previewW * 0.68f, "CT", "M4A1",
+				C::Get<Color>(esp_box_color_ct),
+				C::Get<Color>(esp_skeleton_color_ct),
+				C::Get<Color>(esp_snapline_color_ct));
+		}
+		else
+		{
+			drawPreviewEntity(previewOrig.x + previewW * 0.5f, "Enemy", "Rifle",
+				C::Get<Color>(esp_box_color_ct),
+				C::Get<Color>(esp_skeleton_color_ct),
+				C::Get<Color>(esp_snapline_color_ct));
 		}
 	}
 	ImGui::EndChild();
@@ -476,6 +653,9 @@ static void RenderMiscTab()
 		MENU::Checkbox("No Flash", &C::Get<bool>(misc_noflash));
 		if (C::Get<bool>(misc_noflash))
 			MENU::SliderFloat("Flash Alpha", &C::Get<float>(misc_noflash_alpha), 0.0f, 255.0f, "%.0f");
+
+		MENU::Checkbox("Sniper Crosshair", &C::Get<bool>(misc_sniper_crosshair));
+		MENU::Tooltip("Draw crosshair when holding unscoped sniper");
 	}
 	ImGui::EndChild();
 
@@ -489,6 +669,16 @@ static void RenderMiscTab()
 			MENU::SliderFloat("Distance", &C::Get<float>(misc_thirdperson_distance), 50.0f, 300.0f, "%.0f");
 
 		MENU::SliderFloat("FOV Changer", &C::Get<float>(misc_fov_changer), 60.0f, 140.0f, "%.0f");
+
+		ImGui::Spacing();
+		MENU::Separator("Radar");
+		MENU::Checkbox("Custom Radar", &C::Get<bool>(misc_radar_enabled));
+		MENU::Tooltip("Draw a custom radar overlay showing enemy positions");
+		if (C::Get<bool>(misc_radar_enabled))
+		{
+			MENU::SliderFloat("Radar Size", &C::Get<float>(misc_radar_size), 60.0f, 300.0f, "%.0f");
+			MENU::SliderFloat("Radar Range", &C::Get<float>(misc_radar_range), 500.0f, 5000.0f, "%.0f");
+		}
 	}
 	ImGui::EndChild();
 
@@ -738,12 +928,12 @@ void MENU::Render()
 	const float flW = MENU_WIDTH * flDpi;
 	const float flH = MENU_HEIGHT * flDpi;
 
-	ImGui::SetNextWindowSize(ImVec2(flW, flH), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(flW, flH), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(500.0f, 400.0f), ImVec2(1600.0f, 1200.0f));
 	ImGui::PushStyleVar(ImGuiStyleVar_Alpha, flMenuAlpha);
 
 	constexpr ImGuiWindowFlags flags =
 		ImGuiWindowFlags_NoCollapse |
-		ImGuiWindowFlags_NoResize |
 		ImGuiWindowFlags_NoScrollbar |
 		ImGuiWindowFlags_NoTitleBar;
 
@@ -837,7 +1027,7 @@ void MENU::Render()
 			}
 
 			char szLabel[64];
-			snprintf(szLabel, sizeof(szLabel), "  %s %s", g_tabs[i].szIcon, g_tabs[i].szLabel);
+			snprintf(szLabel, sizeof(szLabel), "  %s", g_tabs[i].szLabel);
 
 			if (ImGui::Button(szLabel, ImVec2(sidebarW - 8.0f, 28.0f * flDpi)))
 				nCurrentTab = i;

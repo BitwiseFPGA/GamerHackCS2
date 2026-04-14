@@ -270,22 +270,71 @@ std::uintptr_t MEM::FindPatternEx(const std::uint8_t* pStart, std::size_t nSize,
 	if (nPatternLen == 0 || nSize < nPatternLen)
 		return 0;
 
-	const std::uint8_t* pEnd = pStart + nSize - nPatternLen;
+	const std::uint8_t* const pModuleEnd = pStart + nSize;
+	const std::uint8_t* const pScanBound = pModuleEnd - nPatternLen;
+	const std::uint8_t* pCur = pStart;
 
-	for (const std::uint8_t* pCur = pStart; pCur <= pEnd; ++pCur)
+	// Walk region-by-region using VirtualQuery to skip non-readable/guard pages.
+	// Critical fix: PAGE_GUARD pages raise STATUS_GUARD_PAGE_VIOLATION (not AV).
+	// Non-committed gaps in a DLL's SizeOfImage range must be skipped, not abort.
+	while (pCur <= pScanBound)
 	{
-		bool bFound = true;
-		for (std::size_t j = 0; j < nPatternLen; ++j)
+		MEMORY_BASIC_INFORMATION mbi{};
+		if (!VirtualQuery(pCur, &mbi, sizeof(mbi)))
+			break; // VirtualQuery failure — cannot safely advance
+
+		const std::uint8_t* pRegionEnd =
+			reinterpret_cast<const std::uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
+
+		// Safety: ensure we make forward progress
+		if (pRegionEnd <= pCur)
+			break;
+
+		// Skip non-committed regions (MEM_FREE / MEM_RESERVE) and guard pages.
+		// PAGE_GUARD must be checked on the RAW Protect value before stripping modifiers.
+		if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD))
 		{
-			if (szMask[j] != '?' && pCur[j] != pBytes[j])
-			{
-				bFound = false;
-				break;
-			}
+			pCur = pRegionEnd;
+			continue;
 		}
 
-		if (bFound)
-			return reinterpret_cast<std::uintptr_t>(pCur);
+		// Check readability (strip only cache-mode modifier bits, NOT PAGE_GUARD)
+		const DWORD nProt = mbi.Protect & ~(PAGE_NOCACHE | PAGE_WRITECOMBINE);
+		const bool bReadable = (nProt == PAGE_READONLY           ||
+		                        nProt == PAGE_READWRITE           ||
+		                        nProt == PAGE_EXECUTE             ||
+		                        nProt == PAGE_EXECUTE_READ        ||
+		                        nProt == PAGE_EXECUTE_READWRITE   ||
+		                        nProt == PAGE_EXECUTE_WRITECOPY   ||
+		                        nProt == PAGE_WRITECOPY);
+
+		if (!bReadable)
+		{
+			pCur = pRegionEnd;
+			continue;
+		}
+
+		// Clamp inner scan end to this readable region and the overall scan bound
+		const std::uint8_t* pInnerEnd = pRegionEnd - nPatternLen;
+		if (pInnerEnd > pScanBound)
+			pInnerEnd = pScanBound;
+
+		for (; pCur <= pInnerEnd; ++pCur)
+		{
+			bool bFound = true;
+			for (std::size_t j = 0; j < nPatternLen; ++j)
+			{
+				if (szMask[j] != '?' && pCur[j] != pBytes[j])
+				{
+					bFound = false;
+					break;
+				}
+			}
+			if (bFound)
+				return reinterpret_cast<std::uintptr_t>(pCur);
+		}
+
+		pCur = pRegionEnd;
 	}
 
 	return 0;

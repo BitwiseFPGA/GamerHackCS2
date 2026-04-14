@@ -10,6 +10,10 @@
 // used: ViewMatrix for world-to-screen
 #include "../sdk/datatypes/matrix.h"
 
+// used: hooks (IsRelativeMouseMode original), interfaces (InputSystem)
+#include "../core/hooks.h"
+#include "../core/interfaces.h"
+
 // used: [ext] ImGui (fetched via CMake FetchContent)
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -41,7 +45,8 @@ bool D::Setup(HWND hWnd, ID3D11Device* pDev, ID3D11DeviceContext* pCtx)
 	ImGui::CreateContext();
 
 	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+	// Do NOT suppress cursor changes — ImGui needs to show the arrow cursor while menu is open.
+	// io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
 
 	// configure style
 	ImGui::StyleColorsDark();
@@ -126,6 +131,10 @@ void D::BeginFrame()
 	if (!bInitialized)
 		return;
 
+	// Re-enforce cursor state every frame — CS2 may re-clip it each tick
+	if (MENU::bIsOpen)
+		ClipCursor(NULL);
+
 	// swap render stack at the start of each frame
 	RenderStack::Swap();
 
@@ -159,42 +168,67 @@ bool D::OnWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	// process input for input system
 	IPT::OnWndProc(hWnd, uMsg, wParam, lParam);
 
-	// toggle menu on INSERT key
+	// toggle menu on INSERT key — only when ImGui is fully initialized
 	if (uMsg == WM_KEYDOWN && wParam == VK_INSERT)
 	{
+		// ImGui must be initialized before any GetIO() / context calls
+		if (!D::bInitialized || !ImGui::GetCurrentContext())
+			return false;
+
 		MENU::bIsOpen = !MENU::bIsOpen;
+
+		if (MENU::bIsOpen)
+		{
+			ClipCursor(NULL);
+			ShowCursor(TRUE);
+			ImGui::GetIO().MouseDrawCursor = true;
+
+			// force mouse out of relative (locked) mode via IsRelativeMouseMode original
+			if (I::InputSystem)
+			{
+				auto oRelMouse = H::hkIsRelativeMouseMode.GetOriginal();
+				if (oRelMouse)
+					oRelMouse(I::InputSystem, false);
+			}
+		}
+		else
+		{
+			ImGui::GetIO().MouseDrawCursor = false;
+			ShowCursor(FALSE);
+
+			// restore game's relative mouse state
+			if (I::InputSystem)
+			{
+				auto oRelMouse = H::hkIsRelativeMouseMode.GetOriginal();
+				if (oRelMouse)
+					oRelMouse(I::InputSystem, H::bGameRelativeMouseActive);
+			}
+
+			// release any keys that the game may think are still held
+			// (user may have released movement keys while menu was open)
+			static const int arrKeys[] = {
+				'W', 'A', 'S', 'D', VK_SPACE, VK_SHIFT, VK_CONTROL,
+				'E', 'R', 'F', 'G', '1', '2', '3', '4', '5', VK_TAB
+			};
+			for (int vk : arrKeys)
+			{
+				if (!(GetAsyncKeyState(vk) & 0x8000))
+					::CallWindowProcW(IPT::pOldWndProc, hWnd, WM_KEYUP, vk,
+						(MapVirtualKeyA(vk, MAPVK_VK_TO_VSC) << 16) | 0xC0000001);
+			}
+			if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+				::CallWindowProcW(IPT::pOldWndProc, hWnd, WM_LBUTTONUP, 0, 0);
+			if (!(GetAsyncKeyState(VK_RBUTTON) & 0x8000))
+				::CallWindowProcW(IPT::pOldWndProc, hWnd, WM_RBUTTONUP, 0, 0);
+		}
 	}
 
-	// when menu is open, forward to ImGui
-	if (MENU::bIsOpen)
+	// when menu is open, consume ALL messages after ImGui processes them
+	if (MENU::bIsOpen && D::bInitialized && ImGui::GetCurrentContext())
 	{
+		ClipCursor(NULL);
 		ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam);
-
-		// block game input for mouse/keyboard when menu is open
-		switch (uMsg)
-		{
-		case WM_MOUSEMOVE:
-		case WM_LBUTTONDOWN:
-		case WM_LBUTTONUP:
-		case WM_LBUTTONDBLCLK:
-		case WM_RBUTTONDOWN:
-		case WM_RBUTTONUP:
-		case WM_RBUTTONDBLCLK:
-		case WM_MBUTTONDOWN:
-		case WM_MBUTTONUP:
-		case WM_MBUTTONDBLCLK:
-		case WM_XBUTTONDOWN:
-		case WM_XBUTTONUP:
-		case WM_XBUTTONDBLCLK:
-		case WM_MOUSEWHEEL:
-		case WM_MOUSEHWHEEL:
-		case WM_KEYDOWN:
-		case WM_KEYUP:
-		case WM_SYSKEYDOWN:
-		case WM_SYSKEYUP:
-		case WM_CHAR:
-			return true; // block game input
-		}
+		return true;
 	}
 
 	return false;

@@ -54,6 +54,7 @@ static constexpr FallbackOffset_t s_arrFallbackOffsets[] =
 	{"CEntityIdentity->m_flags", 0x30},
 
 	// CGameSceneNode
+	{"CGameSceneNode->m_nodeToWorld", 0x10},
 	{"CGameSceneNode->m_pOwner", 0x30},
 	{"CGameSceneNode->m_pChild", 0x40},
 	{"CGameSceneNode->m_pNextSibling", 0x48},

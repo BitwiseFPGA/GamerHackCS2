@@ -2,6 +2,8 @@
 #include "patterns.h"
 #include "../utilities/xorstr.h"
 #include "../sdk/interfaces/iswapchain.h"
+#include "../sdk/interfaces/ipvs.h"
+#include "../sdk/functionlist.h"
 
 // ============================================================================
 // pattern definitions for non-CreateInterface pointers
@@ -36,12 +38,14 @@ static MEM::PatternInfo_t s_arrPatterns[] =
 		"xref view matrix in CViewRender"
 	},
 	// CGameTraceManager — client.dll
+	// Pattern starts with 4-byte prefix D9 0F 57 C0 before the 4C 8B 2D MOV instruction;
+	// nOffset=4 skips that prefix so PTR resolution resolves at the correct 7-byte MOV R13,[rip+X]
 	{
 		"CGameTraceManager",
 		PATTERNS::MODULES::CLIENT,
 		PATTERNS::FUNCTIONS::GAME_TRACE_MANAGER,
 		MEM::ESearchType::PTR,
-		0, 0,
+		4, 0,
 		"xref CGameTraceManager in TraceShape"
 	},
 	// ISwapChainDx11 — rendersystemdx11.dll
@@ -54,6 +58,8 @@ static MEM::PatternInfo_t s_arrPatterns[] =
 		0, 0,
 		"xref swap chain store in CRenderDeviceDx11"
 	},
+	// NOTE: FirstCUserCmdArray is resolved manually after the batch scan (see below).
+	// This avoids a pattern that also matches the entity system reference.
 };
 
 // ============================================================================
@@ -134,11 +140,21 @@ bool I::Setup()
 		L_PRINT(LOG_INFO) << _XS("  SwapChain = ") << static_cast<const void*>(SwapChain);
 	}
 
-	// D3D11 Device and DeviceContext are resolved lazily in the Present hook callback.
-	// The ISwapChainDx11 struct layout may be wrong, so we don't attempt to dereference it here.
-	// The Present hook (via gameoverlayrenderer64.dll or vtable) receives IDXGISwapChain* directly.
+	// ---- entity system from game resource service (resolve FIRST so we can validate CUserCmd) ----
 
-	// ---- entity system from game resource service ----
+	// ---- PVS (Potentially Visible Set) — model occlusion control ----
+	{
+		auto uPVS = MEM::FindPattern(PATTERNS::MODULES::ENGINE2, PATTERNS::FUNCTIONS::PVS, MEM::ESearchType::NONE);
+		if (uPVS)
+		{
+			PVS = reinterpret_cast<CPVS*>(MEM::GetAbsoluteAddress(uPVS, 3, 7));
+			L_PRINT(LOG_INFO) << _XS("  PVS = ") << static_cast<const void*>(PVS);
+		}
+		else
+		{
+			L_PRINT(LOG_WARNING) << _XS("  PVS pattern not found — model occlusion will remain enabled");
+		}
+	}
 
 	if (GameResourceService)
 	{
@@ -159,6 +175,42 @@ bool I::Setup()
 			L_PRINT(LOG_WARNING) << _XS("CGameEntitySystem is null (offset may need updating)");
 	}
 
+	// ---- FirstCUserCmdArray — try multiple patterns, validate against entity system ----
+	{
+		// candidate patterns for the CUserCmd** global (mov rcx, [rip+X] before GetCUserCmdArray call)
+		static const char* arrCUserCmdPatterns[] = {
+			"48 8B 0D ? ? ? ? E8 ? ? ? ? 48 8B CF 4C 8B F8",  // Andromeda disasm comment variant (mov r15, rax)
+			"48 8B 0D ? ? ? ? E8 ? ? ? ? 48 8B CF 4C 8B F0",  // variant (mov r14, rax)
+			"48 8B 0D ? ? ? ? E8 ? ? ? ? 48 8B CF 48 8B F0",  // original Andromeda code pattern (mov rsi, rax)
+			"48 8B 0D ? ? ? ? E8 ? ? ? ? 48 8B CF 49 8B F0",  // variant (mov rsi, r8)
+		};
+
+		for (const auto* szPat : arrCUserCmdPatterns)
+		{
+			std::uintptr_t uMatch = MEM::FindPattern(PATTERNS::MODULES::CLIENT, szPat, MEM::ESearchType::PTR, 0);
+			if (!uMatch)
+				continue;
+
+			void* pResolved = *reinterpret_cast<void**>(uMatch);
+			L_PRINT(LOG_INFO) << _XS("  CUserCmd pattern '") << szPat << _XS("' -> ") << pResolved;
+
+			// validate: must not be null and must not be the entity system pointer
+			if (pResolved && pResolved != static_cast<void*>(GameEntitySystem))
+			{
+				FirstCUserCmdArray = pResolved;
+				L_PRINT(LOG_INFO) << _XS("  FirstCUserCmdArray = ") << FirstCUserCmdArray << _XS(" (validated OK)");
+				break;
+			}
+			else
+			{
+				L_PRINT(LOG_WARNING) << _XS("  CUserCmd pattern matched entity system or null, skipping");
+			}
+		}
+
+		if (!FirstCUserCmdArray)
+			L_PRINT(LOG_WARNING) << _XS("  FirstCUserCmdArray not found in pattern scan — will retry in PostResolve");
+	}
+
 	// ---- validation ----
 
 	L_PRINT(LOG_INFO) << _XS("--- interface summary ---");
@@ -176,6 +228,8 @@ bool I::Setup()
 	L_PRINT(LOG_INFO) << _XS("  ViewMatrixPtr:     ") << static_cast<const void*>(ViewMatrixPtr);
 	L_PRINT(LOG_INFO) << _XS("  Localize:          ") << static_cast<const void*>(Localize);
 	L_PRINT(LOG_INFO) << _XS("  MaterialSystem:    ") << static_cast<const void*>(MaterialSystem);
+	L_PRINT(LOG_INFO) << _XS("  PVS:               ") << static_cast<const void*>(PVS);
+	L_PRINT(LOG_INFO) << _XS("  FirstCUserCmdArray:") << static_cast<const void*>(FirstCUserCmdArray);
 	L_PRINT(LOG_INFO) << _XS("  (D3D Device/Context resolved lazily in Present hook)");
 
 	// critical interfaces that must be present
@@ -187,6 +241,75 @@ bool I::Setup()
 
 	L_PRINT(LOG_INFO) << _XS("--- interface capture complete ---");
 	return true;
+}
+
+// ============================================================================
+// PostResolve — called after SDK_FUNC::Initialize() to resolve remaining ptrs
+// ============================================================================
+void I::PostResolve()
+{
+	if (FirstCUserCmdArray)
+	{
+		L_PRINT(LOG_INFO) << _XS("[PostResolve] FirstCUserCmdArray already resolved: ") << FirstCUserCmdArray;
+		return;
+	}
+
+	L_PRINT(LOG_INFO) << _XS("[PostResolve] attempting GetCUserCmdTick body extraction...");
+
+	// fallback: extract from GetCUserCmdTick function body
+	// GetCUserCmdTick contains: 4C 8B 0D xx xx xx xx (mov r9, [rip+X]) somewhere in the prolog.
+	// Scan first 32 bytes to handle any prolog variant (SUB RSP + optional PUSH regs).
+	if (SDK_FUNC::GetCUserCmdTick)
+	{
+		__try
+		{
+			std::uintptr_t uFuncAddr = reinterpret_cast<std::uintptr_t>(SDK_FUNC::GetCUserCmdTick);
+			bool bFound = false;
+			for (int nOff = 0; nOff < 32 && !bFound; ++nOff)
+			{
+				if (*reinterpret_cast<std::uint8_t*>(uFuncAddr + nOff)     == 0x4C &&
+					*reinterpret_cast<std::uint8_t*>(uFuncAddr + nOff + 1) == 0x8B &&
+					*reinterpret_cast<std::uint8_t*>(uFuncAddr + nOff + 2) == 0x0D)
+				{
+					bFound = true;
+					std::uintptr_t uPtrAddr = MEM::GetAbsoluteAddress(uFuncAddr + nOff, 3, 7);
+					void* pResolved = *reinterpret_cast<void**>(uPtrAddr);
+					L_PRINT(LOG_INFO) << _XS("  GetCUserCmdTick 4C 8B 0D found at +") << nOff
+						<< _XS(", body ptr = ") << pResolved;
+					if (pResolved && pResolved != static_cast<void*>(GameEntitySystem))
+					{
+						FirstCUserCmdArray = pResolved;
+						L_PRINT(LOG_INFO) << _XS("  FirstCUserCmdArray = ") << FirstCUserCmdArray
+							<< _XS(" (from GetCUserCmdTick body)");
+					}
+					else
+					{
+						L_PRINT(LOG_WARNING) << _XS("  GetCUserCmdTick body ptr matches entity system or null");
+					}
+				}
+			}
+			if (!bFound)
+			{
+				L_PRINT(LOG_WARNING) << _XS("  4C 8B 0D not found in first 32 bytes of GetCUserCmdTick");
+				for (int i = 0; i < 16; i++)
+				{
+					L_PRINT(LOG_INFO) << _XS("  byte[") << i << _XS("] = 0x")
+						<< std::hex << static_cast<int>(*reinterpret_cast<std::uint8_t*>(uFuncAddr + i));
+				}
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			L_PRINT(LOG_ERROR) << _XS("  SEH exception extracting CUserCmd from GetCUserCmdTick");
+		}
+	}
+	else
+	{
+		L_PRINT(LOG_WARNING) << _XS("  GetCUserCmdTick not resolved — no fallback available");
+	}
+
+	if (!FirstCUserCmdArray)
+		L_PRINT(LOG_WARNING) << _XS("[PostResolve] FirstCUserCmdArray FAILED — aimbot will use SetViewAngle fallback");
 }
 
 // ============================================================================
