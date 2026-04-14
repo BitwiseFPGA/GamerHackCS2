@@ -2,7 +2,6 @@
 #include "patterns.h"
 #include "interfaces.h"
 #include "../sdk/interfaces/iswapchain.h"
-#include "../sdk/interfaces/ipvs.h"
 #include "../utilities/xorstr.h"
 #include "../sdk/functionlist.h"
 
@@ -529,30 +528,6 @@ static void SafeCallOriginalFSN(void(__fastcall* fn)(void*, int), void* pThis, i
 	}
 }
 
-static void EnforcePVSDisabled(int nFrameStage)
-{
-	if (!I::PVS)
-		return;
-
-	// Round restarts can re-enable occlusion without firing LevelInit again.
-	if (nFrameStage != FRAME_NET_UPDATE_POSTDATAUPDATE_END && nFrameStage != FRAME_RENDER_START)
-		return;
-
-	__try
-	{
-		I::PVS->Set(false);
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		static bool bLogged = false;
-		if (!bLogged)
-		{
-			bLogged = true;
-			L_PRINT(LOG_WARNING) << _XS("[hook] PVS->Set(false) faulted during FrameStageNotify");
-		}
-	}
-}
-
 void __fastcall H::FrameStageNotify(void* pThis, int nFrameStage)
 {
 	const auto oFrameStageNotify = hkFrameStageNotify.GetOriginal();
@@ -564,7 +539,6 @@ void __fastcall H::FrameStageNotify(void* pThis, int nFrameStage)
 		L_PRINT(LOG_INFO) << _XS("[hook] FrameStageNotify first call, stage=") << nFrameStage << _XS(" pThis=") << pThis;
 	}
 
-	EnforcePVSDisabled(nFrameStage);
 	SafeCallFeaturesFSN(nFrameStage);
 
 	SafeCallOriginalFSN(oFrameStageNotify, pThis, nFrameStage);
@@ -635,21 +609,6 @@ void* __fastcall H::LevelInit(void* pClientModeShared, const char* szNewMap)
 
 	L_PRINT(LOG_INFO) << _XS("[hook] LevelInit called: ") << (szNewMap ? szNewMap : "null");
 	F::OnLevelInit(szNewMap);
-
-	// disable PVS (model occlusion) so enemy models remain visible at all times
-	// both Andromeda and Asphyxia do this in LevelInit
-	if (I::PVS)
-	{
-		__try
-		{
-			I::PVS->Set(false);
-			L_PRINT(LOG_INFO) << _XS("[hook] PVS disabled (model occlusion off)");
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			L_PRINT(LOG_WARNING) << _XS("[hook] PVS->Set(false) faulted — vtable index may be wrong");
-		}
-	}
 
 	L_PRINT(LOG_INFO) << _XS("[hook] LevelInit: calling original...");
 

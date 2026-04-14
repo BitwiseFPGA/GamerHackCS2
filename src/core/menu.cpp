@@ -465,12 +465,6 @@ static void RenderVisualsTab()
 		MENU::Checkbox("Weapon", &C::Get<bool>(esp_weapon));
 		if (C::Get<bool>(esp_weapon))
 			MENU::ColorEdit("Weapon Color", &C::Get<Color>(esp_weapon_color));
-		MENU::Checkbox("Skeleton", &C::Get<bool>(esp_skeleton));
-		if (C::Get<bool>(esp_skeleton))
-		{
-			MENU::ColorEdit("T Color##skeleton", &C::Get<Color>(esp_skeleton_color_t));
-			MENU::ColorEdit("CT Color##skeleton", &C::Get<Color>(esp_skeleton_color_ct));
-		}
 		MENU::Checkbox("Snaplines", &C::Get<bool>(esp_snaplines));
 		if (C::Get<bool>(esp_snaplines))
 		{
@@ -538,7 +532,7 @@ static void RenderVisualsTab()
 		};
 
 		auto drawPreviewEntity = [&](float cx, const char* szName, const char* szWeapon,
-			const Color& colBox, const Color& colSkeleton, const Color& colSnapline)
+			const Color& colBox, const Color& colSnapline)
 		{
 			const float boxH = C::Get<bool>(esp_team) ? 62.0f : 76.0f;
 			const float boxW = boxH * 0.48f;
@@ -573,33 +567,6 @@ static void RenderVisualsTab()
 				pDraw->AddRectFilled({ abX, abY }, { abX + 4.0f, y2 }, C::Get<Color>(esp_armor_color).ToImU32(), 2.0f);
 			}
 
-			if (C::Get<bool>(esp_skeleton))
-			{
-				const ImU32 boneCol = colSkeleton.ToImU32();
-				const ImVec2 pelvis(cx, y1 + boxH * 0.78f);
-				const ImVec2 chest(cx, y1 + boxH * 0.40f);
-				const ImVec2 head(cx, y1 + boxH * 0.18f);
-				const ImVec2 lShoulder(x1 + boxW * 0.20f, y1 + boxH * 0.42f);
-				const ImVec2 rShoulder(x2 - boxW * 0.20f, y1 + boxH * 0.42f);
-				const ImVec2 lHand(x1 + boxW * 0.05f, y1 + boxH * 0.60f);
-				const ImVec2 rHand(x2 - boxW * 0.05f, y1 + boxH * 0.60f);
-				const ImVec2 lKnee(x1 + boxW * 0.30f, y1 + boxH * 0.92f);
-				const ImVec2 rKnee(x2 - boxW * 0.30f, y1 + boxH * 0.92f);
-				const ImVec2 lFoot(x1 + boxW * 0.18f, y2);
-				const ImVec2 rFoot(x2 - boxW * 0.18f, y2);
-
-				pDraw->AddLine(head, chest, boneCol, 1.5f);
-				pDraw->AddLine(chest, pelvis, boneCol, 1.5f);
-				pDraw->AddLine(chest, lShoulder, boneCol, 1.5f);
-				pDraw->AddLine(lShoulder, lHand, boneCol, 1.5f);
-				pDraw->AddLine(chest, rShoulder, boneCol, 1.5f);
-				pDraw->AddLine(rShoulder, rHand, boneCol, 1.5f);
-				pDraw->AddLine(pelvis, lKnee, boneCol, 1.5f);
-				pDraw->AddLine(lKnee, lFoot, boneCol, 1.5f);
-				pDraw->AddLine(pelvis, rKnee, boneCol, 1.5f);
-				pDraw->AddLine(rKnee, rFoot, boneCol, 1.5f);
-			}
-
 			if (C::Get<bool>(esp_name))
 			{
 				const ImVec2 tSz = ImGui::CalcTextSize(szName);
@@ -617,18 +584,15 @@ static void RenderVisualsTab()
 		{
 			drawPreviewEntity(previewOrig.x + previewW * 0.32f, "T", "AK-47",
 				C::Get<Color>(esp_box_color_t),
-				C::Get<Color>(esp_skeleton_color_t),
 				C::Get<Color>(esp_snapline_color_t));
 			drawPreviewEntity(previewOrig.x + previewW * 0.68f, "CT", "M4A1",
 				C::Get<Color>(esp_box_color_ct),
-				C::Get<Color>(esp_skeleton_color_ct),
 				C::Get<Color>(esp_snapline_color_ct));
 		}
 		else
 		{
 			drawPreviewEntity(previewOrig.x + previewW * 0.5f, "Enemy", "Rifle",
 				C::Get<Color>(esp_box_color_ct),
-				C::Get<Color>(esp_skeleton_color_ct),
 				C::Get<Color>(esp_snapline_color_ct));
 		}
 	}
@@ -678,6 +642,8 @@ static void RenderMiscTab()
 		{
 			MENU::SliderFloat("Radar Size", &C::Get<float>(misc_radar_size), 60.0f, 300.0f, "%.0f");
 			MENU::SliderFloat("Radar Range", &C::Get<float>(misc_radar_range), 500.0f, 5000.0f, "%.0f");
+			MENU::SliderFloat("Radar X", &C::Get<float>(misc_radar_pos_x), 0.0f, 100.0f, "%.0f%%");
+			MENU::SliderFloat("Radar Y", &C::Get<float>(misc_radar_pos_y), 0.0f, 100.0f, "%.0f%%");
 		}
 	}
 	ImGui::EndChild();

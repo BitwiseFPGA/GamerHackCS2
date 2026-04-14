@@ -13,6 +13,7 @@
 // used: hooks (IsRelativeMouseMode original), interfaces (InputSystem)
 #include "../core/hooks.h"
 #include "../core/interfaces.h"
+#include "../sdk/interfaces/iengineclient.h"
 
 // used: [ext] ImGui (fetched via CMake FetchContent)
 #include <imgui.h>
@@ -194,14 +195,23 @@ bool D::OnWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		else
 		{
 			ImGui::GetIO().MouseDrawCursor = false;
-			ShowCursor(FALSE);
+			ClipCursor(NULL);
+
+			const bool bInGame = (I::Engine && I::Engine->IsInGame());
+			ShowCursor(bInGame ? FALSE : TRUE);
 
 			// restore game's relative mouse state
-			if (I::InputSystem)
+			if (I::InputSystem && bInGame)
 			{
 				auto oRelMouse = H::hkIsRelativeMouseMode.GetOriginal();
 				if (oRelMouse)
 					oRelMouse(I::InputSystem, H::bGameRelativeMouseActive);
+			}
+			else if (I::InputSystem)
+			{
+				auto oRelMouse = H::hkIsRelativeMouseMode.GetOriginal();
+				if (oRelMouse)
+					oRelMouse(I::InputSystem, false);
 			}
 
 			// release any keys that the game may think are still held
@@ -358,12 +368,15 @@ void D::DrawHealthBar(const Vector2D& pos, float height, int health, int maxHeal
 // ---------------------------------------------------------------
 bool D::WorldToScreen(const Vector3& vecWorld, Vector2D* pScreenOut)
 {
+	if (!pScreenOut || !ImGui::GetCurrentContext())
+		return false;
+
 	const auto& mat = SDK::ViewMatrix;
 
 	const float w = mat.arrData[3][0] * vecWorld.x + mat.arrData[3][1] * vecWorld.y +
 		mat.arrData[3][2] * vecWorld.z + mat.arrData[3][3];
 
-	if (w < 0.001f)
+	if (!std::isfinite(w) || w <= 0.001f)
 		return false;
 
 	const float flInvW = 1.0f / w;
@@ -372,12 +385,23 @@ bool D::WorldToScreen(const Vector3& vecWorld, Vector2D* pScreenOut)
 	const float y = mat.arrData[1][0] * vecWorld.x + mat.arrData[1][1] * vecWorld.y +
 		mat.arrData[1][2] * vecWorld.z + mat.arrData[1][3];
 
+	const float flNdcX = x * flInvW;
+	const float flNdcY = y * flInvW;
+	if (!std::isfinite(flNdcX) || !std::isfinite(flNdcY))
+		return false;
+
+	// Reject near-plane explosions where W is barely positive and the projected
+	// point blows up to massive off-screen coordinates.
+	constexpr float MAX_REASONABLE_NDC = 5.0f;
+	if (std::fabs(flNdcX) > MAX_REASONABLE_NDC || std::fabs(flNdcY) > MAX_REASONABLE_NDC)
+		return false;
+
 	const ImVec2 vecDisplaySize = ImGui::GetIO().DisplaySize;
 
-	pScreenOut->x = (vecDisplaySize.x * 0.5f) + (x * flInvW) * (vecDisplaySize.x * 0.5f);
-	pScreenOut->y = (vecDisplaySize.y * 0.5f) - (y * flInvW) * (vecDisplaySize.y * 0.5f);
+	pScreenOut->x = (vecDisplaySize.x * 0.5f) + flNdcX * (vecDisplaySize.x * 0.5f);
+	pScreenOut->y = (vecDisplaySize.y * 0.5f) - flNdcY * (vecDisplaySize.y * 0.5f);
 
-	return true;
+	return std::isfinite(pScreenOut->x) && std::isfinite(pScreenOut->y);
 }
 
 // ---------------------------------------------------------------

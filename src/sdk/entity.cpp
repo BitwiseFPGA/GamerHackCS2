@@ -153,7 +153,11 @@ bool C_BaseEntity::ComputeHitboxSurroundingBox(Vector3* pMins, Vector3* pMaxs)
 int C_BaseEntity::GetBoneIdByName(const char* szName)
 {
 	if (SDK_FUNC::GetBoneIdByName && szName && szName[0] != '\0')
-		return SDK_FUNC::GetBoneIdByName(this, szName);
+	{
+		const int nBoneIndex = SDK_FUNC::GetBoneIdByName(this, szName);
+		if (nBoneIndex != -1)
+			return nBoneIndex;
+	}
 
 	CGameSceneNode* pGameSceneNode = GetGameSceneNode();
 	if (!pGameSceneNode)

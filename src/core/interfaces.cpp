@@ -2,7 +2,6 @@
 #include "patterns.h"
 #include "../utilities/xorstr.h"
 #include "../sdk/interfaces/iswapchain.h"
-#include "../sdk/interfaces/ipvs.h"
 #include "../sdk/functionlist.h"
 
 // ============================================================================
@@ -142,20 +141,6 @@ bool I::Setup()
 
 	// ---- entity system from game resource service (resolve FIRST so we can validate CUserCmd) ----
 
-	// ---- PVS (Potentially Visible Set) — model occlusion control ----
-	{
-		auto uPVS = MEM::FindPattern(PATTERNS::MODULES::ENGINE2, PATTERNS::FUNCTIONS::PVS, MEM::ESearchType::NONE);
-		if (uPVS)
-		{
-			PVS = reinterpret_cast<CPVS*>(MEM::GetAbsoluteAddress(uPVS, 3, 7));
-			L_PRINT(LOG_INFO) << _XS("  PVS = ") << static_cast<const void*>(PVS);
-		}
-		else
-		{
-			L_PRINT(LOG_WARNING) << _XS("  PVS pattern not found — model occlusion will remain enabled");
-		}
-	}
-
 	if (GameResourceService)
 	{
 		__try
@@ -228,7 +213,6 @@ bool I::Setup()
 	L_PRINT(LOG_INFO) << _XS("  ViewMatrixPtr:     ") << static_cast<const void*>(ViewMatrixPtr);
 	L_PRINT(LOG_INFO) << _XS("  Localize:          ") << static_cast<const void*>(Localize);
 	L_PRINT(LOG_INFO) << _XS("  MaterialSystem:    ") << static_cast<const void*>(MaterialSystem);
-	L_PRINT(LOG_INFO) << _XS("  PVS:               ") << static_cast<const void*>(PVS);
 	L_PRINT(LOG_INFO) << _XS("  FirstCUserCmdArray:") << static_cast<const void*>(FirstCUserCmdArray);
 	L_PRINT(LOG_INFO) << _XS("  (D3D Device/Context resolved lazily in Present hook)");
 

@@ -75,8 +75,6 @@ void F::Destroy()
 void F::OnPresent()
 {
 	VISUALS::OnPresent();
-	VISUALS::DrawSniperCrosshair();
-	VISUALS::DrawRadar();
 	MISC::OnPresent();
 }
 

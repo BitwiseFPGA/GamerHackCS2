@@ -284,7 +284,7 @@ public:
 
 	CSkeletonInstance* GetSkeletonInstance()
 	{
-		return reinterpret_cast<CSkeletonInstance*>(this);
+		return MEM::CallVFunc<CSkeletonInstance*, 8U>(this);
 	}
 
 	void SetMeshGroupMask(std::uint64_t uMeshGroupMask);

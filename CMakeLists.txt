@@ -99,9 +99,27 @@ set(SOURCES_SDK
 set(SOURCES_FEATURES
     src/features/features.cpp
     src/features/bypass/bypass.cpp
+    src/features/bypass/bypass_actions.cpp
+    src/features/bypass/bypass_create_move.cpp
+    src/features/bypass/bypass_crc.cpp
+    src/features/bypass/bypass_lifecycle.cpp
     src/features/inventory/inventory.cpp
+    src/features/inventory/inventory_actions.cpp
+    src/features/inventory/inventory_runtime.cpp
+    src/features/inventory/inventory_state.cpp
     src/features/legitbot/legitbot.cpp
+    src/features/legitbot/legitbot_aim.cpp
+    src/features/legitbot/legitbot_core.cpp
+    src/features/legitbot/legitbot_math.cpp
+    src/features/legitbot/legitbot_targeting.cpp
     src/features/misc/misc.cpp
+    src/features/misc/misc_camera.cpp
+    src/features/misc/misc_core.cpp
+    src/features/misc/misc_effects.cpp
+    src/features/misc/misc_movement.cpp
+    src/features/visuals/esp.cpp
+    src/features/visuals/radar.cpp
+    src/features/visuals/sniper_crosshair.cpp
     src/features/visuals/visuals.cpp
 )
 

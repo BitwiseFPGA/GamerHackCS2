@@ -33,7 +33,6 @@ class ISwapChainDx11;
 
 // engine2.dll
 class CGameTraceManager;
-class CPVS;
 
 // localize.dll
 class CLocalize;
@@ -106,9 +105,6 @@ namespace I
 
 	// client.dll — econ item system (pattern scanned)
 	inline CEconItemSystem* EconItemSystem = nullptr;
-
-	// engine2.dll — PVS (Potentially Visible Set) for model occlusion control
-	inline CPVS* PVS = nullptr;
 
 	// client.dll — global CUserCmd** array pointer (used for CUserCmd acquisition in CreateMove)
 	inline void* FirstCUserCmdArray = nullptr;

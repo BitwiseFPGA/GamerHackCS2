@@ -38,7 +38,6 @@ C_ADD_VARIABLE(bool,  esp_name,        true);
 C_ADD_VARIABLE(bool,  esp_health,      true);
 C_ADD_VARIABLE(bool,  esp_armor,       false);
 C_ADD_VARIABLE(bool,  esp_weapon,      true);
-C_ADD_VARIABLE(bool,  esp_skeleton,    false);
 C_ADD_VARIABLE(bool,  esp_snaplines,   false);
 C_ADD_VARIABLE(int,   esp_box_type,    0);           // 0 = normal, 1 = corner
 C_ADD_VARIABLE(Color, esp_box_color_t,  Color(255, 0, 0));
@@ -46,8 +45,6 @@ C_ADD_VARIABLE(Color, esp_box_color_ct, Color(0, 100, 255));
 C_ADD_VARIABLE(Color, esp_name_color,   Color(255, 255, 255, 230));
 C_ADD_VARIABLE(Color, esp_weapon_color, Color(220, 220, 220, 210));
 C_ADD_VARIABLE(Color, esp_armor_color,  Color(0, 128, 255, 255));
-C_ADD_VARIABLE(Color, esp_skeleton_color_t,  Color(255, 180, 50, 230));
-C_ADD_VARIABLE(Color, esp_skeleton_color_ct, Color(100, 180, 255, 230));
 C_ADD_VARIABLE(Color, esp_snapline_color_t,  Color(255, 100, 100, 160));
 C_ADD_VARIABLE(Color, esp_snapline_color_ct, Color(100, 170, 255, 160));
 
@@ -68,6 +65,8 @@ C_ADD_VARIABLE(bool,  misc_sniper_crosshair,     false);
 C_ADD_VARIABLE(bool,  misc_radar_enabled,        false);
 C_ADD_VARIABLE(float, misc_radar_size,           120.0f);  // radar circle diameter
 C_ADD_VARIABLE(float, misc_radar_range,          1500.0f); // world units range
+C_ADD_VARIABLE(float, misc_radar_pos_x,          1.0f);    // horizontal position as screen %
+C_ADD_VARIABLE(float, misc_radar_pos_y,          1.0f);    // vertical position as screen %
 
 // ---- inventory ----
 C_ADD_VARIABLE(bool, inventory_enabled, false);

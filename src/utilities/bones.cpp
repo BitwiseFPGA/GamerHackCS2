@@ -1,6 +1,7 @@
 #include "bones.h"
 
 #include "memory.h"
+#include "log.h"
 #include "xorstr.h"
 #include "../sdk/entity.h"
 #include "../sdk/functionlist.h"
@@ -39,11 +40,27 @@ void BONES::CalcWorldSpaceBones(CSkeletonInstance* pSkeleton, uint32_t nBoneMask
 	if (!pSkeleton)
 		return;
 
+	if (SDK_FUNC::CalcWorldSpaceBones)
+	{
+		SDK_FUNC::CalcWorldSpaceBones(pSkeleton, nBoneMask);
+		return;
+	}
+
 	using fnCalcWorldSpaceBones = void(__fastcall*)(CSkeletonInstance*, uint32_t);
 	static auto oCalcWorldSpaceBones = reinterpret_cast<fnCalcWorldSpaceBones>(
 		MEM::FindPattern(_XS("client.dll"),
 			_XS("48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B")));
 
 	if (oCalcWorldSpaceBones)
+	{
 		oCalcWorldSpaceBones(pSkeleton, nBoneMask);
+		return;
+	}
+
+	static bool bLoggedMissingCalcBones = false;
+	if (!bLoggedMissingCalcBones)
+	{
+		bLoggedMissingCalcBones = true;
+		L_PRINT(LOG_WARNING) << _XS("[BONES] CalcWorldSpaceBones unresolved");
+	}
 }
