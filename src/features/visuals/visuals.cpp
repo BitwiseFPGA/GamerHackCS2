@@ -78,6 +78,15 @@ static bool GetBoundingBox(C_CSPlayerPawn* pPawn, BBox& bbox)
 		if (screen.y > screenMaxY) screenMaxY = screen.y;
 	}
 
+	const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+	if (screenMaxX < 0.0f || screenMaxY < 0.0f || screenMinX > displaySize.x || screenMinY > displaySize.y)
+		return false;
+
+	screenMinX = std::clamp(screenMinX, 0.0f, displaySize.x);
+	screenMinY = std::clamp(screenMinY, 0.0f, displaySize.y);
+	screenMaxX = std::clamp(screenMaxX, 0.0f, displaySize.x);
+	screenMaxY = std::clamp(screenMaxY, 0.0f, displaySize.y);
+
 	bbox.width = screenMaxX - screenMinX;
 	bbox.height = screenMaxY - screenMinY;
 
@@ -183,71 +192,99 @@ static void DrawPlayerWeapon(const BBox& bbox, C_CSPlayerPawn* pPawn)
 	D::DrawText(weaponPos, C::Get<Color>(esp_weapon_color), szDisplay, true);
 }
 
+static Vector3 GetBonePositionByName(C_CSPlayerPawn* pPawn, const char* szBoneName)
+{
+	Vector3 bonePosition{};
+	if (!pPawn || !szBoneName || szBoneName[0] == '\0')
+		return bonePosition;
+
+	auto* pSceneNode = pPawn->GetGameSceneNode();
+	if (!pSceneNode)
+		return bonePosition;
+
+	auto* pSkeletonInstance = pSceneNode->GetSkeletonInstance();
+	if (!pSkeletonInstance)
+		return bonePosition;
+
+	BONES::CalcWorldSpaceBones(pSkeletonInstance, 0xFFFFF);
+
+	CStrongHandle<CModel> hModel = pSkeletonInstance->GetModelState().GetModel();
+	if (!hModel.IsValid())
+		return bonePosition;
+
+	const int nBoneIndex = pPawn->GetBoneIdByName(szBoneName);
+	if (nBoneIndex != -1 && pSceneNode->GetBonePosition(nBoneIndex, bonePosition))
+		return bonePosition;
+
+	return {};
+}
+
 static void DrawPlayerSkeleton(C_CSPlayerPawn* pPawn, int nTeam)
 {
-	auto* pSceneNode = pPawn->GetGameSceneNode();
-	if (!pSceneNode) return;
-
-	auto* pSkeleton = pSceneNode->GetSkeletonInstance();
-	if (!pSkeleton) return;
-
-	// Force bone update once before reading any positions
-	BONES::CalcWorldSpaceBones(pSkeleton, 0xFFFFF);
+	if (!pPawn)
+		return;
 
 	const Color colBone = GetPlayerSkeletonColor(nTeam);
-	Matrix2x4* pBoneCache = pSkeleton->GetBoneCache();
-	if (!pBoneCache)
-		return;
-	const int nBoneCount = pSkeleton->GetBoneCount();
 
-	auto GetBonePos = [&](int nBoneIndex, Vector3& outPos) -> bool
+	struct BoneConnection_t
 	{
-		if (nBoneIndex < 0 || nBoneIndex >= nBoneCount)
-			return false;
-
-		outPos = pBoneCache->GetOrigin(nBoneIndex);
-		if (!outPos.IsZero())
-			return true;
-
-		if (pSceneNode->GetBonePosition(nBoneIndex, outPos) && !outPos.IsZero())
-			return true;
-
-		return BONES::GetBonePosition(pPawn, nBoneIndex, outPos);
+		const char* szFrom;
+		const char* szTo;
 	};
 
-	for (const auto& pair : BONES::arrSkeletonPairs)
+	static constexpr BoneConnection_t BoneConnections[] =
 	{
-		Vector3 from{}, to{};
-		if (!GetBonePos(pair.nParent, from) || !GetBonePos(pair.nChild, to))
+		{ "head_0", "neck_0" },
+		{ "neck_0", "spine_1" },
+		{ "spine_1", "spine_2" },
+		{ "spine_2", "spine_3" },
+		{ "spine_3", "pelvis" },
+		{ "neck_0", "clavicle_l" },
+		{ "clavicle_l", "arm_upper_l" },
+		{ "arm_upper_l", "arm_lower_l" },
+		{ "arm_lower_l", "hand_l" },
+		{ "neck_0", "clavicle_r" },
+		{ "clavicle_r", "arm_upper_r" },
+		{ "arm_upper_r", "arm_lower_r" },
+		{ "arm_lower_r", "hand_r" },
+		{ "pelvis", "leg_upper_l" },
+		{ "leg_upper_l", "leg_lower_l" },
+		{ "leg_lower_l", "ankle_l" },
+		{ "pelvis", "leg_upper_r" },
+		{ "leg_upper_r", "leg_lower_r" },
+		{ "leg_lower_r", "ankle_r" }
+	};
+
+	for (const auto& connection : BoneConnections)
+	{
+		const Vector3 fromBone = GetBonePositionByName(pPawn, connection.szFrom);
+		const Vector3 toBone = GetBonePositionByName(pPawn, connection.szTo);
+		if (fromBone.IsZero() || toBone.IsZero())
 			continue;
 
-		Vector2D fromScreen, toScreen;
-		if (D::WorldToScreen(from, &fromScreen) && D::WorldToScreen(to, &toScreen))
+		Vector2D fromScreen{}, toScreen{};
+		if (D::WorldToScreen(fromBone, &fromScreen) && D::WorldToScreen(toBone, &toScreen))
 			D::DrawLine(fromScreen, toScreen, colBone, 1.5f);
 	}
 
-	Vector3 headPos{}, neckPos{};
-	Vector2D headScreen;
-	if (GetBonePos(6, headPos) && D::WorldToScreen(headPos, &headScreen))
-	{
-		float flRadius = 5.0f;
-		if (GetBonePos(5, neckPos))
-		{
-			Vector2D neckScreen;
-			if (D::WorldToScreen(neckPos, &neckScreen))
-				flRadius = std::max(3.0f, std::fabs(headScreen.y - neckScreen.y) * 0.75f);
-		}
-		else
-		{
-			Vector3 headTop = headPos;
-			headTop.z += 7.0f;
-			Vector2D headTopScreen;
-			if (D::WorldToScreen(headTop, &headTopScreen))
-				flRadius = std::max(3.0f, std::fabs(headScreen.y - headTopScreen.y));
-		}
+	const Vector3 headBone = GetBonePositionByName(pPawn, "head_0");
+	const Vector3 neckBone = GetBonePositionByName(pPawn, "neck_0");
+	if (headBone.IsZero())
+		return;
 
-		D::DrawCircle(headScreen, flRadius, colBone, 16);
+	Vector2D headScreen{};
+	if (!D::WorldToScreen(headBone, &headScreen))
+		return;
+
+	float flRadius = 5.0f;
+	if (!neckBone.IsZero())
+	{
+		Vector2D neckScreen{};
+		if (D::WorldToScreen(neckBone, &neckScreen))
+			flRadius = std::max(3.0f, std::fabs(headScreen.y - neckScreen.y) * 0.75f);
 	}
+
+	D::DrawCircle(headScreen, flRadius, colBone, 16);
 }
 
 static void DrawPlayerSnapline(const BBox& bbox, int nTeam)
