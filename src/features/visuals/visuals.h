@@ -9,4 +9,6 @@ namespace F::VISUALS
 	void Destroy();
 	void OnPresent();
 	void OnFrameStageNotify(int nStage);
+	void DrawSniperCrosshair();
+	void DrawRadar();
 }

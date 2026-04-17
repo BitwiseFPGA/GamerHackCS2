@@ -93,6 +93,9 @@ bool CORE::Setup(HMODULE hMod)
 		{
 			L_PRINT(LOG_INFO) << _XS("[CORE] SDK functions OK");
 		}
+
+		// resolve FirstCUserCmdArray fallback using SDK_FUNC if pattern scan failed
+		I::PostResolve();
 	}
 	catch (const std::exception& ex)
 	{

@@ -84,24 +84,6 @@ public:
 static_assert(sizeof(SurfaceData_t) == 0x18);
 
 // ---------------------------------------------------------------
-// trace hitbox data
-// ---------------------------------------------------------------
-struct TraceHitboxData_t
-{
-private:
-	std::uint8_t _pad0[0x38];
-public:
-	int m_nHitGroup;
-
-private:
-	std::uint8_t _pad1[0x4];
-public:
-	int m_nHitboxId;
-};
-
-static_assert(sizeof(TraceHitboxData_t) == 0x44);
-
-// ---------------------------------------------------------------
 // game trace result (CGameTrace)
 // ---------------------------------------------------------------
 class C_CSPlayerPawn;
@@ -110,14 +92,14 @@ struct GameTrace_t
 {
 	GameTrace_t() = default;
 
-	[[nodiscard]] bool DidHit() const { return m_flFraction < 1.0f; }
-	[[nodiscard]] bool IsVisible() const { return m_flFraction >= 1.0f - 1e-6f; }
-	[[nodiscard]] int GetHitgroup() const { return m_pHitboxData ? m_pHitboxData->m_nHitGroup : -1; }
-	[[nodiscard]] int GetHitboxId() const { return m_pHitboxData ? m_pHitboxData->m_nHitboxId : -1; }
+	[[nodiscard]] bool DidHit() const { return m_flFraction < 1.0f || m_bStartSolid; }
+	[[nodiscard]] bool IsVisible() const { return m_flFraction > 0.97f; }
+	[[nodiscard]] int GetHitgroup() const { return m_pHitbox ? m_pHitbox->nGroupId : -1; }
+	[[nodiscard]] int GetHitboxId() const { return m_pHitbox ? static_cast<int>(m_pHitbox->nHitBoxIndex) : -1; }
 
 	void* m_pSurface;                // 0x00
 	C_CSPlayerPawn* m_pHitEntity;    // 0x08
-	TraceHitboxData_t* m_pHitboxData; // 0x10
+	CHitBox* m_pHitbox;              // 0x10
 
 private:
 	std::uint8_t _pad0[0x38];
@@ -140,10 +122,11 @@ public:
 private:
 	std::uint8_t _pad3[0x6];
 public:
-	bool m_bAllSolid;                // 0xB6 (bStartSolid in some versions)
+	std::uint8_t m_nShapeType;       // 0xB6
+	bool m_bStartSolid;              // 0xB7
 
 private:
-	std::uint8_t _pad4[0x4D];
+	std::uint8_t _pad4[0x50];
 };
 
 static_assert(sizeof(GameTrace_t) == 0x108);
@@ -180,8 +163,18 @@ public:
 	bool TraceShape(Ray_t* pRay, Vector3 vecStart, Vector3 vecEnd, TraceFilter_t* pFilter, GameTrace_t* pGameTrace)
 	{
 		using fnTraceShape = bool(__fastcall*)(CGameTraceManager*, Ray_t*, Vector3*, Vector3*, TraceFilter_t*, GameTrace_t*);
-		static auto oTraceShape = reinterpret_cast<fnTraceShape>(
-			MEM::FindPattern(_XS("client.dll"), _XS("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B 71")));
+		static fnTraceShape oTraceShape = []() -> fnTraceShape {
+			// Primary: direct prolog scan (2026-04-03 build)
+			auto uAddr = MEM::FindPattern(_XS("client.dll"), _XS("48 89 5C 24 ? 48 89 4C 24 ? 55 57"));
+			if (uAddr) return reinterpret_cast<fnTraceShape>(uAddr);
+			// Fallback: scan_absolute via E8 call site
+			const auto uCallSite = MEM::FindPattern(_XS("client.dll"),
+				_XS("E8 ? ? ? ? 80 7D ? ? 75 ? F3 0F 10 45 ? 48"));
+			if (!uCallSite) return nullptr;
+			const auto nRel = *reinterpret_cast<std::int32_t*>(uCallSite + 1);
+			return reinterpret_cast<fnTraceShape>(
+				uCallSite + 5 + static_cast<std::uintptr_t>(static_cast<std::ptrdiff_t>(nRel)));
+		}();
 
 		if (!oTraceShape)
 			return false;
@@ -192,8 +185,10 @@ public:
 	bool ClipRayToEntity(Ray_t* pRay, Vector3 vecStart, Vector3 vecEnd, C_CSPlayerPawn* pPawn, TraceFilter_t* pFilter, GameTrace_t* pGameTrace)
 	{
 		using fnClipRayToEntity = bool(__fastcall*)(CGameTraceManager*, Ray_t*, Vector3*, Vector3*, C_CSPlayerPawn*, TraceFilter_t*, GameTrace_t*);
+		// Updated pattern (2026-04-03 build)
 		static auto oClipRayToEntity = reinterpret_cast<fnClipRayToEntity>(
-			MEM::FindPattern(_XS("client.dll"), _XS("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 54 41 56 41 57 48 81 EC ? ? ? ? 48 8B 9C")));
+			MEM::FindPattern(_XS("client.dll"),
+				_XS("48 8B C4 48 89 58 ? 55 56 57 41 54 41 56 48 8D 68 ? 48 81 EC ? ? ? ? 48 8B 5D")));
 
 		if (!oClipRayToEntity)
 			return false;

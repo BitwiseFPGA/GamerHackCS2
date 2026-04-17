@@ -87,7 +87,7 @@ enum ELogModeFlags : LogModeFlags_t
  * LOGGING SYSTEM
  * - stream-based interface (operator<<)
  * - console output with colored text
- * - file output to faghack.log
+ * - file output to gamerhack.log
  * - thread-safe with mutex
  * - timestamp prefix on each line
  */

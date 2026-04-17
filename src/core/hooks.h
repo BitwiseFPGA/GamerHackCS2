@@ -54,12 +54,15 @@ namespace H
 	/* @section: D3D11/DXGI handlers */
 	HRESULT __stdcall Present(IDXGISwapChain* pSwapChain, UINT uSyncInterval, UINT uFlags);
 	HRESULT __stdcall ResizeBuffers(IDXGISwapChain* pSwapChain, UINT nBufferCount, UINT nWidth, UINT nHeight, DXGI_FORMAT newFormat, UINT nFlags);
+	HRESULT WINAPI   CreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain);
 
 	/* @section: game handlers */
-	bool __fastcall CreateMove(CCSGOInput* pInput, int nSlot, CUserCmd* pCmd);
+	bool __fastcall CreateMove(CCSGOInput* pInput, uint32_t nSlot, char a3);
 	void __fastcall FrameStageNotify(void* pThis, int nFrameStage);
 	bool __fastcall MouseInputEnabled(void* pThis);
-	ViewMatrix* __fastcall GetMatrixForView(void* pRenderGameSystem, void* pViewRender, ViewMatrix* pOutWorldToView, ViewMatrix* pOutViewToProjection, ViewMatrix* pOutWorldToProjection);
+	void __fastcall IsRelativeMouseMode(void* pInputSystem, bool bActive);
+	// Andromeda signature: 6 params + void return. Missing 6th param caused random crashes.
+	void __fastcall GetMatrixForView(void* pRenderGameSystem, void* pViewRender, ViewMatrix* pOutWorldToView, ViewMatrix* pOutViewToProjection, ViewMatrix* pOutWorldToProjection, ViewMatrix* pOutWorldToPixels);
 	void __fastcall OverrideView(void* pClientModeCSNormal, void* pViewSetup);
 	void* __fastcall LevelInit(void* pClientModeShared, const char* szNewMap);
 	void* __fastcall LevelShutdown(void* pClientModeShared);
@@ -70,14 +73,19 @@ namespace H
 	/* @section: hook objects */
 	inline CBaseHookObject<decltype(&Present)> hkPresent = {};
 	inline CBaseHookObject<decltype(&ResizeBuffers)> hkResizeBuffers = {};
+	inline CBaseHookObject<decltype(&CreateSwapChain)> hkCreateSwapChain = {};
 
 	inline CBaseHookObject<decltype(&CreateMove)> hkCreateMove = {};
 	inline CBaseHookObject<decltype(&FrameStageNotify)> hkFrameStageNotify = {};
 	inline CBaseHookObject<decltype(&MouseInputEnabled)> hkMouseInputEnabled = {};
+	inline CBaseHookObject<decltype(&IsRelativeMouseMode)> hkIsRelativeMouseMode = {};
 	inline CBaseHookObject<decltype(&GetMatrixForView)> hkGetMatrixForView = {};
 	inline CBaseHookObject<decltype(&OverrideView)> hkOverrideView = {};
 	inline CBaseHookObject<decltype(&LevelInit)> hkLevelInit = {};
 	inline CBaseHookObject<decltype(&LevelShutdown)> hkLevelShutdown = {};
+
+	// game's desired relative mouse mode state (saved for restoration on menu close)
+	inline bool bGameRelativeMouseActive = true;
 }
 
 // ---------------------------------------------------------------

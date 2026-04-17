@@ -3,29 +3,34 @@
 #include <functional>
 
 #include "../../utilities/memory.h"
+#include "../../sdk/functionlist.h"
 
 class IEngineClient
 {
 public:
-	// VFunc index 34
 	int GetMaxClients()
 	{
+		// vtable[34] — used rarely; not crash-critical
 		return MEM::CallVFunc<int, 34U>(this);
 	}
 
-	// VFunc index 35
 	bool IsInGame()
 	{
-		return MEM::CallVFunc<bool, 35U>(this);
+		// NOT a vtable call — vtable indices are unstable across CS2 updates.
+		// Andromeda uses a pattern-scanned function for this.
+		if (SDK_FUNC::IsInGame)
+			return SDK_FUNC::IsInGame(this);
+		return false;
 	}
 
-	// VFunc index 36
 	bool IsConnected()
 	{
+		// vtable[36] — used rarely; if it crashes update to pattern-scan like IsInGame
 		return MEM::CallVFunc<bool, 36U>(this);
 	}
 
-	// VFunc index 49 — returns local player CBaseHandle index
+	// vtable[49] is suspect. Use SDK_FUNC::GetLocalPlayerController(-1) instead
+	// whenever you need the local player — it's safer and already pattern-resolved.
 	int GetLocalPlayer()
 	{
 		int nIndex = -1;
@@ -33,19 +38,20 @@ public:
 		return nIndex + 1;
 	}
 
-	// VFunc index 56
 	[[nodiscard]] const char* GetLevelName()
 	{
-		return MEM::CallVFunc<const char*, 56U>(this);
+		if (SDK_FUNC::GetLevelName)
+			return SDK_FUNC::GetLevelName(this);
+		return nullptr;
 	}
 
-	// VFunc index 57
 	[[nodiscard]] const char* GetLevelNameShort()
 	{
-		return MEM::CallVFunc<const char*, 57U>(this);
+		if (SDK_FUNC::GetLevelNameShort)
+			return SDK_FUNC::GetLevelNameShort(this);
+		return nullptr;
 	}
 
-	// VFunc index 84
 	[[nodiscard]] const char* GetProductVersionString()
 	{
 		return MEM::CallVFunc<const char*, 84U>(this);

@@ -41,11 +41,24 @@ bool SDK_FUNC::Initialize()
     #define RESOLVE_CRITICAL(FN, MODULE, PATTERN, ...) \
         { ++nTotal; if (ResolveFunction(FN, #FN, MODULE, PATTERN, ##__VA_ARGS__)) ++nResolved; else bAllCritical = false; }
 
-    const char* CLIENT = PATTERNS::MODULES::CLIENT;
+    const char* CLIENT  = PATTERNS::MODULES::CLIENT;
+    const char* ENGINE2 = PATTERNS::MODULES::ENGINE2;
 
-    // --- Entity System ---
-    RESOLVE(GetBaseEntity, CLIENT, PATTERNS::FUNCTIONS::GET_BASE_ENTITY);
-    RESOLVE(GetLocalPlayerController, CLIENT, PATTERNS::FUNCTIONS::GET_LOCAL_PLAYER_CONTROLLER);
+    // --- Engine State (pattern-scanned — vtable indices are not stable) ---
+    RESOLVE(IsInGame,           ENGINE2, PATTERNS::FUNCTIONS::IS_IN_GAME);
+    RESOLVE(GetLevelName,       ENGINE2, PATTERNS::FUNCTIONS::GET_LEVEL_NAME);
+    RESOLVE(GetLevelNameShort,  ENGINE2, PATTERNS::FUNCTIONS::GET_LEVEL_NAME_SHORT);
+
+    // --- Entity System --- (try Andromeda pattern, fallback to Asphyxia)
+    if (!ResolveFunction(GetBaseEntity, "GetBaseEntity", CLIENT, PATTERNS::FUNCTIONS::GET_BASE_ENTITY))
+    {
+        L_PRINT(LOG_WARNING) << _XS("[SDK_FUNC] trying Asphyxia fallback for GetBaseEntity...");
+        ResolveFunction(GetBaseEntity, "GetBaseEntity", CLIENT, PATTERNS::FUNCTIONS::GET_BASE_ENTITY_ALT);
+    }
+    if (GetBaseEntity) ++nResolved;
+    ++nTotal;
+    RESOLVE(GetLocalPlayerController, CLIENT, PATTERNS::FUNCTIONS::GET_LOCAL_PLAYER_CONTROLLER,
+        MEM::ESearchType::CALL);
 
     // --- Inventory ---
     RESOLVE(CCSInventoryManager_Get, CLIENT,
@@ -77,7 +90,7 @@ bool SDK_FUNC::Initialize()
 
     // --- Bones ---
     RESOLVE(CalcWorldSpaceBones, CLIENT, PATTERNS::FUNCTIONS::CALC_WORLD_SPACE_BONES);
-    RESOLVE(GetBoneIdByName, CLIENT, PATTERNS::FUNCTIONS::GET_BONE_ID_BY_NAME);
+    RESOLVE(GetBoneIdByName, CLIENT, PATTERNS::FUNCTIONS::GET_BONE_ID_BY_NAME, MEM::ESearchType::CALL);
 
     // --- Entity Utilities ---
     RESOLVE(ComputeHitboxSurroundingBox, CLIENT,
@@ -86,8 +99,13 @@ bool SDK_FUNC::Initialize()
         "85 D2 0F 88 5C");
 
     // --- Input/View ---
-    RESOLVE(GetViewAngles, CLIENT, PATTERNS::FUNCTIONS::GET_VIEW_ANGLES);
+    RESOLVE(GetViewAngles, CLIENT, PATTERNS::FUNCTIONS::GET_VIEW_ANGLES, MEM::ESearchType::CALL);
     RESOLVE(SetViewAngles, CLIENT, PATTERNS::FUNCTIONS::SET_VIEW_ANGLES);
+
+    // --- CUserCmd acquisition (Andromeda patterns) ---
+    RESOLVE(GetCUserCmdTick, CLIENT, "48 83 EC ? 4C 8B 0D ? ? ? ? 4C 8B DA");
+    RESOLVE(GetCUserCmdArray, CLIENT, "48 89 4C 24 ? 41 56 41 57");
+    RESOLVE(GetCUserCmdBySequenceNumber, CLIENT, "40 53 48 83 EC ? 8B DA E8 ? ? ? ? 4C 8B C0");
 
     // --- Visual ---
     RESOLVE(ScreenTransform, CLIENT, PATTERNS::FUNCTIONS::SCREEN_TRANSFORM);
@@ -145,6 +163,10 @@ bool SDK_FUNC::Initialize()
     #undef RESOLVE_CRITICAL
 
     L_PRINT(LOG_INFO) << _XS("[SDK_FUNC] resolved ") << nResolved << _XS("/") << nTotal << _XS(" functions");
+
+    // Critical engine functions must resolve — IsInGame controls all per-tick feature dispatch
+    if (!IsInGame)
+        L_PRINT(LOG_WARNING) << _XS("[SDK_FUNC] WARNING: IsInGame not resolved — features will be disabled every tick");
 
     return true; // non-fatal — features check individual pointers
 }

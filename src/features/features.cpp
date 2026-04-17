@@ -1,7 +1,10 @@
 #include "features.h"
 #include "visuals/visuals.h"
+#include "ragebot/ragebot.h"
 #include "legitbot/legitbot.h"
+#include "legitbot/legitbot_autowall.h"
 #include "misc/misc.h"
+#include "misc/misc_engpred.h"
 #include "inventory/inventory.h"
 #include "bypass/bypass.h"
 #include "../utilities/log.h"
@@ -39,10 +42,27 @@ bool F::Setup()
 		return false;
 	}
 
+	if (!RAGEBOT::Setup())
+	{
+		L_PRINT(LOG_WARNING) << _XS("[F] ragebot setup failed");
+		return false;
+	}
+
+	if (!LEGITBOT::AUTOWALL::Setup())
+	{
+		L_PRINT(LOG_WARNING) << _XS("[F] autowall setup failed (non-fatal)");
+		// non-fatal — autowall is optional
+	}
+
 	if (!MISC::Setup())
 	{
 		L_PRINT(LOG_WARNING) << _XS("[F] misc setup failed");
 		return false;
+	}
+
+	if (!MISC::ENGPRED::Setup())
+	{
+		L_PRINT(LOG_WARNING) << _XS("[F] engine prediction setup failed (non-fatal)");
 	}
 
 	if (!INVENTORY::Setup())
@@ -60,7 +80,10 @@ void F::Destroy()
 	L_PRINT(LOG_INFO) << _XS("[F] destroying features...");
 
 	INVENTORY::Destroy();
+	MISC::ENGPRED::Destroy();
 	MISC::Destroy();
+	LEGITBOT::AUTOWALL::Destroy();
+	RAGEBOT::Destroy();
 	LEGITBOT::Destroy();
 	VISUALS::Destroy();
 	TRACE::Destroy();
@@ -80,18 +103,25 @@ void F::OnPresent()
 
 void F::OnCreateMove(CCSGOInput* pInput, CUserCmd* pCmd)
 {
-	if (!pInput || !pCmd)
+	if (!pInput)
 		return;
 
-	// bypass pre-processing (backup state)
-	BYPASS::PreCreateMove(pInput, pCmd);
-
-	// feature processing
-	LEGITBOT::OnCreateMove(pInput, pCmd);
-	MISC::OnCreateMove(pInput, pCmd);
-
-	// bypass post-processing (apply subticks, restore angles)
-	BYPASS::PostCreateMove(pInput, pCmd);
+	if (pCmd)
+	{
+		// full CUserCmd path — all features
+		BYPASS::PreCreateMove(pInput, pCmd);
+		MISC::ENGPRED::Run(pInput, pCmd);
+		RAGEBOT::OnCreateMove(pInput, pCmd);
+		LEGITBOT::OnCreateMove(pInput, pCmd);
+		MISC::OnCreateMove(pInput, pCmd);
+		MISC::ENGPRED::End(pInput, pCmd);
+		BYPASS::PostCreateMove(pInput, pCmd);
+	}
+	else
+	{
+		// no pCmd — still call aimbot with SetViewAngle fallback
+		LEGITBOT::OnCreateMove(pInput, nullptr);
+	}
 }
 
 void F::OnFrameStageNotify(int nStage)

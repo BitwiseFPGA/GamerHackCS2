@@ -64,12 +64,16 @@ namespace PATTERNS {
     // ========================================================================
     namespace FUNCTIONS {
         // --- Entity System ---
-        // Search: "CGameEntitySystem::GetBaseEntity" or xref from GetHighestEntityIndex
-        constexpr const char* GET_BASE_ENTITY = "81 FA ? ? 00 00 77 ? 8B C2 EB 37";
+        // Andromeda pattern: lea r9,[rcx+10h]; cmp edx,max; ja fail; mov ecx,edx; sar ecx,9
+        constexpr const char* GET_BASE_ENTITY = "4C 8D 49 10 81 FA ? ? 00 00 77 ? 8B CA C1 F9 09";
+        // Asphyxia fallback: cmp edx,max; ja fail; mov eax,edx; sar eax,?; cmp eax,...
+        constexpr const char* GET_BASE_ENTITY_ALT = "81 FA ? ? ? ? 77 ? 8B C2 C1 F8 ? 83 F8 ? 77 ? 48 98 48 8B 4C C1";
 
         // --- Local Player ---
-        // Search: string "m_hPawn" or "GetLocalPlayerController"
-        constexpr const char* GET_LOCAL_PLAYER_CONTROLLER = "48 83 EC ? E8 ? ? ? ? 48 85 C0 74 ? 8B 88";
+        // Search: call site E8 -> follow to get the actual CGameEntitySystem_GetLocalPlayerController
+        // Context after call: mov rbp,rax; test rax,rax; jz; xor ebx,ebx; cmp [rip+X],ebx
+        // REQUIRES SEARCH_TYPE_CALL to follow the E8 and get the real function address
+        constexpr const char* GET_LOCAL_PLAYER_CONTROLLER = "E8 ? ? ? ? 48 8B E8 48 85 C0 74 ? 33 DB 39 1D";
 
         // --- CreateMove ---
         // Search: "cl: CreateMove clamped invalid attack history index" xref in client.dll
@@ -80,11 +84,19 @@ namespace PATTERNS {
         constexpr const char* FRAME_STAGE_NOTIFY = "48 89 5C 24 ? 48 89 6C 24 ? 57 48 83 EC ? 48 8B F9 33 ED";
 
         // --- MouseInputEnabled ---
-        // VFunc on ISource2Client, index 19
+        // @ida client.dll: 40 53 48 83 EC 20 80 B9 ? ? ? ? ? 48 8B D9 75 78
+        // Also hookable via vtable index 19 on ISource2Client
+        constexpr const char* MOUSE_INPUT_ENABLED = "40 53 48 83 EC 20 80 B9 ? ? ? ? ? 48 8B D9 75 78";
+
+        // --- IsRelativeMouseMode (inputsystem.dll) ---
+        // Called every frame to set SDL relative mouse mode (locks cursor to game)
+        // Hook to return false when menu is open so cursor is free to move
+        constexpr const char* IS_RELATIVE_MOUSE_MODE = "48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 0F B6 F2";
 
         // --- GetMatrixForView ---
         // Search: CViewRender->OnRenderStart -> GetMatricesForView
-        constexpr const char* GET_MATRIX_FOR_VIEW = "40 53 48 81 EC ? ? ? ? 49 8B D9";
+        // Updated 2024: function now opens with MOV RAX,RSP / home-area saves / PUSH RDI / MOVAPS XMM6
+        constexpr const char* GET_MATRIX_FOR_VIEW = "48 8B C4 48 89 68 ? 48 89 70 ? 57 48 81 EC ? ? ? ? 0F 29 70 ? 49 8B F1";
 
         // --- OverrideView ---
         // Search: "ClientModeCSNormal::OverrideView" in client.dll
@@ -92,16 +104,25 @@ namespace PATTERNS {
 
         // --- LevelInit ---
         // Search: "game_newmap" string xref -> first function
-        constexpr const char* LEVEL_INIT = "48 89 5C 24 ? 57 48 83 EC ? 48 8B 0D ? ? ? ? 48 8B FA";
+        // Updated 2024: new prologue — PUSH RBP/RSI/R14, setup frame via LEA RBP,[rsp+?]
+        constexpr const char* LEVEL_INIT = "40 55 56 41 56 48 8D 6C 24 ? 48 81 EC E0 00 00 00 48 8B 0D";
 
         // --- LevelShutdown ---
         // Search: "map_shutdown" string in ClientModeShared
         constexpr const char* LEVEL_SHUTDOWN = "48 83 EC ? 48 8B 0D ? ? ? ? 48 8D 15 ? ? ? ? 45 33 C9 45 33 C0 48 8B 01 FF 50 ? 48 85 C0 74 15";
 
+        // --- Engine State (pattern-scanned — vtable indices are unstable across CS2 updates) ---
+        // IsInGame: engine2.dll — loads state object, checks pointer + member flags
+        constexpr const char* IS_IN_GAME           = "48 8B ? ? ? ? ? 48 85 C0 74 15 80 B8 ? ? ? ? ? 75 0C 83 B8 ? ? ? ? 06";
+        // GetLevelName / GetLevelNameShort: differ only in 0x10/0x18 offset in the path below
+        constexpr const char* GET_LEVEL_NAME       = "48 83 EC 28 E8 ? ? ? ? 84 C0 74 0C 48 8D ? ? ? ? ? 48 83 C4 28 C3 48 8B ? ? ? ? ? 48 85 C9 74 23 83 B9 30 02 00 00 02 7C 1A 48 8B 89 10 02 00 00 48 8D ? ? ? ? ? 48 85 C9 48 0F 45 C1 48 83 C4 28 C3 48 8D ? ? ? ? ? 48 83 C4 28 C3";
+        constexpr const char* GET_LEVEL_NAME_SHORT = "48 83 EC 28 E8 ? ? ? ? 84 C0 74 0C 48 8D ? ? ? ? ? 48 83 C4 28 C3 48 8B ? ? ? ? ? 48 85 C9 74 23 83 B9 30 02 00 00 02 7C 1A 48 8B 89 18 02 00 00 48 8D ? ? ? ? ? 48 85 C9 48 0F 45 C1 48 83 C4 28 C3 48 8D ? ? ? ? ? 48 83 C4 28 C3";
+
         // --- Input/View Angles ---
-        // Search: "SetViewAngles" or viewangle references
-        constexpr const char* GET_VIEW_ANGLES = "4C 8B C1 83 FA ? 74 ? 48 63 C2";
-        constexpr const char* SET_VIEW_ANGLES = "F2 41 0F 10 00 48 63 CA 48 C1 E1 06";
+        // GetViewAngles: CALL pattern — follow E8 to get function, context: E8->EB jmp->48 8B 01
+        constexpr const char* GET_VIEW_ANGLES = "E8 ? ? ? ? EB ? 48 8B 01 48 8D 54 24 ?";
+        // SetViewAngles: direct start — 85 D2 = test edx,edx; 75 ? = jnz; 48 63 81 = movsxd
+        constexpr const char* SET_VIEW_ANGLES = "85 D2 75 ? 48 63 81";
 
         // --- GlobalVars ---
         // Search: "CBaseEntity::SetParent" or GlobalVars xref (now in client.dll)
@@ -113,20 +134,22 @@ namespace PATTERNS {
 
         // --- CGameTraceManager ---
         // Search: xref CGameTraceManager in TraceShape
-        constexpr const char* GAME_TRACE_MANAGER = "4C 8B 3D ? ? ? ? 24 ? 0C ? 66 0F 7F";
+        // Pattern: D9 0F 57 C0 = 4-byte prefix; 4C 8B 2D = MOV R13,[rip+X] — use nOffset=4 in PatternInfo_t
+        constexpr const char* GAME_TRACE_MANAGER = "D9 0F 57 C0 4C 8B 2D ? ? ? ? 24";
 
         // --- SwapChain ---
         // Search: xref swap chain store in CRenderDeviceDx11 (rendersystemdx11.dll)
         // resolves the "48 89 2D" (mov [rip+disp32], rbp) which stores the swap chain ptr
         constexpr const char* SWAP_CHAIN = "48 89 2D ? ? ? ? 66 0F 7F 05";
 
-        // --- SwapChain (for hooks) ---
-        // Search: swap chain object load with null check in rendersystemdx11.dll
-        constexpr const char* SWAP_CHAIN_HOOK = "48 8B 0D ? ? ? ? 48 85 C9 74 ? 8B 41";
-
-        // --- Present (gameoverlayrenderer64.dll) ---
-        // Hook the Steam overlay's Present wrapper directly
-        constexpr const char* PRESENT_OVERLAY = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC ? 41 8B E8";
+        // --- Present / ResizeBuffers / CreateSwapChain via gameoverlayrenderer64.dll ---
+        // Hook the Steam overlay's Present wrapper directly (same as Andromeda-CS2-Base)
+        constexpr const char* PRESENT_OVERLAY        = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC ? 41 8B E8";
+        constexpr const char* RESIZE_BUFFERS_OVERLAY = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 54 41 56 41 57 48 83 EC ? 44 8B E2";
+        // CreateSwapChain wrapper in gameoverlayrenderer64.dll — captured after Present/ResizeBuffers fail
+        // so we hook it to capture IDXGISwapChain* at creation time and install vtable hooks.
+        // Source: Andromeda-CS2-Base CHook_Loader.cpp
+        constexpr const char* CREATE_SWAP_CHAIN      = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B F9 49 8B F1 48 8D ? ? ? ? ? 49 8B D8 48 8B EA E8 ? ? ? ? 48 8D ? ? ? ? ? E8 ? ? ? ? 48 8D ? ? ? ? ? E8 ? ? ? ? 48 8D ? ? ? ? ? E8 ? ? ? ? 48 8B ? ? ? ? ? 4C 8B CE 4C 8B C3 48 8B D5 48 8B CF FF D0 8B D8 85 C0 78 18 48 85 F6 74 13 48 83 3E 00 74 0D 48 8B D5 48 8B CE E8 ? ? ? ? 8B C3 48 8B 5C 24 30 48 8B 6C 24 38 48 8B 74 24 40 48 83 C4 20 5F C3";
 
         // --- ViewMatrix (world-to-projection) ---
         // Search: lea rcx, [rip+ViewMatrix] followed by shl rax, 6
@@ -142,11 +165,18 @@ namespace PATTERNS {
 
         // --- Subtick/Bypass ---
         constexpr const char* CREATE_SUBTICK_MOVE_STEP = "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC ? 49 8B D8 48 8D";
-        constexpr const char* PROTOBUF_ADD_REPEATED_PTR = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B F9 48 8B F2 48 8B 49 38";
+        // Updated 2024: fewer saved registers — drops RSI save, uses MOV RCX,[rcx+?] with wildcard byte
+        constexpr const char* PROTOBUF_ADD_REPEATED_PTR = "48 89 5C 24 ? 57 48 83 EC ? 48 8B D9 48 8B FA 48 8B 49 ? 48 85 C9 74 ? 8B 01";
+
+        // --- PVS (Potentially Visible Set) ---
+        // Search: "CRenderingWorldSession::OnLoopActivate" then go down a bit
+        // LEA rcx, [rip+X] ; xor reg,reg ; call [rax+50h]
+        // Disabling PVS prevents the game from culling (hiding) enemy models
+        constexpr const char* PVS = "48 8D 0D ? ? ? ? 33 ? FF 50";
 
         // --- Bones ---
-        constexpr const char* CALC_WORLD_SPACE_BONES = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B";
-        constexpr const char* GET_BONE_ID_BY_NAME = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B F0 48 8B EA 48 8B D9 E8";
+        constexpr const char* CALC_WORLD_SPACE_BONES = "48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 B8 ? ? ? ? E8 ? ? ? ? 48 2B E0 48 8D 6C 24 ? 48 8B 81";
+        constexpr const char* GET_BONE_ID_BY_NAME = "E8 ? ? ? ? 48 8B CF 85 C0 78 ? 44 8B C0";
 
         // --- Visual ---
         constexpr const char* SCREEN_TRANSFORM = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B E8 48 8B DA";
@@ -158,11 +188,19 @@ namespace PATTERNS {
 
         // --- Trace ---
         constexpr const char* TRACE_SHAPE = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B 71";
-        constexpr const char* TRACE_FILTER_CTOR = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 40";
+        // Andromeda-verified pattern for CTraceFilter constructor
+        constexpr const char* TRACE_FILTER_CTOR = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 0F B6 41 ? 33 FF 24";
 
         // --- HUD ---
         constexpr const char* FIND_HUD_ELEMENT = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 49 8B F0 48 8B DA 48 8B F9 E8";
-        constexpr const char* SET_LOCAL_PLAYER_READY = "48 83 EC ? 48 8B 05 ? ? ? ? 0F B6 D1";
+        // SetLocalPlayerReady: sub rsp + mov r8, [rip+CCSGOInput] + movzx edx, cl + call vtable
+        // Changed from 'mov rax' (48 8B 05) to 'mov r8' (4C 8B 05) in current CS2 build
+        constexpr const char* SET_LOCAL_PLAYER_READY = "48 83 EC ? 4C 8B 05 ? ? ? ? 0F B6 D1";
+
+        // --- Schema System ---
+        // GetAllTypeScope: resolves pointer to array of all CSchemaSystemTypeScope*
+        // Found in schemasystem.dll: mov rax, [rip+X] ... movzx ecx, bx ... mov rdi, [rax+rcx*8]
+        constexpr const char* GET_ALL_TYPE_SCOPE = "48 8B 05 ? ? ? ? 48 8B D6 0F B7 CB 48 8B 3C C8";
 
         // --- CRC Spoofing (SerializePartialToArray) ---
         constexpr const char* SERIALIZE_PARTIAL_TO_ARRAY = "48 89 5C 24 ? 55 56 57 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4";

@@ -3,6 +3,7 @@
 #include "interfaces/igameresourceservice.h"
 #include "interfaces/iengineclient.h"
 #include "interfaces/ischemasystem.h"
+#include "functionlist.h"
 
 // ---------------------------------------------------------------
 // placeholder empty vector for null-safe origin returns
@@ -100,6 +101,27 @@ const Vector3& C_BaseEntity::GetOrigin()
 	return GetSceneOrigin();
 }
 
+bool CGameSceneNode::GetBonePosition(std::int32_t nBoneIndex, Vector3& vecBonePos)
+{
+	vecBonePos = {};
+
+	CSkeletonInstance* pSkeleton = GetSkeletonInstance();
+	if (!pSkeleton || nBoneIndex < 0)
+		return false;
+
+	const int nBoneCount = pSkeleton->GetBoneCount();
+	if (nBoneIndex >= nBoneCount)
+		return false;
+
+	CModelState& modelState = pSkeleton->GetModelState();
+	CBoneData* pBones = modelState.m_pBones;
+	if (!pBones)
+		return false;
+
+	vecBonePos = pBones[nBoneIndex].position;
+	return !vecBonePos.IsZero();
+}
+
 bool C_BaseEntity::GetBoundingBox(Vector3& vecMins, Vector3& vecMaxs)
 {
 	CCollisionProperty* pCollision = GetCollision();
@@ -114,36 +136,21 @@ bool C_BaseEntity::GetBoundingBox(Vector3& vecMins, Vector3& vecMaxs)
 
 bool C_BaseEntity::ComputeHitboxSurroundingBox(Vector3* pMins, Vector3* pMaxs)
 {
-	// uses pattern-resolved function if available, otherwise falls back to collision
 	if (!pMins || !pMaxs)
 		return false;
+
+	if (SDK_FUNC::ComputeHitboxSurroundingBox)
+		return SDK_FUNC::ComputeHitboxSurroundingBox(this, pMins, pMaxs);
 
 	return GetBoundingBox(*pMins, *pMaxs);
 }
 
 int C_BaseEntity::GetBoneIdByName(const char* szName)
 {
-	CGameSceneNode* pGameSceneNode = GetGameSceneNode();
-	if (!pGameSceneNode)
+	if (!SDK_FUNC::GetBoneIdByName || !szName)
 		return -1;
 
-	CSkeletonInstance* pSkeleton = pGameSceneNode->GetSkeletonInstance();
-	if (!pSkeleton)
-		return -1;
-
-	CModelState& modelState = pSkeleton->GetModelState();
-	CStrongHandle<CModel> hModel = modelState.GetModel();
-	CModel* pModel = static_cast<CModel*>(hModel);
-	if (!pModel || !pModel->m_szBoneNames)
-		return -1;
-
-	for (std::uint32_t i = 0; i < pModel->m_nBoneCount; ++i)
-	{
-		if (pModel->m_szBoneNames[i] && std::strcmp(pModel->m_szBoneNames[i], szName) == 0)
-			return static_cast<int>(i);
-	}
-
-	return -1;
+	return SDK_FUNC::GetBoneIdByName(this, szName);
 }
 
 // ---------------------------------------------------------------
@@ -275,4 +282,12 @@ CCSWeaponBaseVData* C_EconItemView::GetBasePlayerWeaponVData()
 	if (!SDK_FUNC::C_EconItemView_GetBasePlayerWeaponVData)
 		return nullptr;
 	return SDK_FUNC::C_EconItemView_GetBasePlayerWeaponVData(this);
+}
+
+void CSkeletonInstance::CalcWorldSpaceBones(unsigned int nMask)
+{
+	if (!SDK_FUNC::CalcWorldSpaceBones)
+		return;
+
+	return SDK_FUNC::CalcWorldSpaceBones(this, nMask);
 }

@@ -1,4 +1,4 @@
-# FAGHackCS2 — Pattern Reference
+# GamerHackCS2 — Pattern Reference
 
 > **Source of Truth:** All patterns, offsets, and version-dependent constants are defined in
 > [`src/core/patterns.h`](src/core/patterns.h). This document provides context and instructions
@@ -7,6 +7,11 @@
 This document explains every byte pattern used in the project, what it resolves to, how to find it in a disassembler (IDA Pro / Ghidra), and when it was last verified.
 
 **Patterns break on every major CS2 update.** When the cheat fails to initialize after an update, update the patterns in `src/core/patterns.h`.
+
+> **D3D Hook note:** As of the current build, the primary D3D11/Present hook is via
+> `gameoverlayrenderer64.dll` (`PRESENT_OVERLAY` pattern). The `SWAP_CHAIN_HOOK` in
+> `rendersystemdx11.dll` is a **secondary/fallback** path. If the overlay renderer isn't
+> available at injection time, the code falls back to the swap chain vtable hook.
 
 ---
 
@@ -130,50 +135,55 @@ FF 50 ??                ; call [rax+??]        ; virtual call
 
 | Field         | Value |
 |---------------|-------|
-| **Pattern**   | `66 0F 7F 05 ? ? ? ? 66 0F 7F 0D ? ? ? ? 48 89 35` |
+| **Pattern**   | `48 89 2D ? ? ? ? 66 0F 7F 05` |
 | **Module**    | `rendersystemdx11.dll` |
 | **Resolves to** | `ISwapChainDx11*` — the game's swap chain wrapper |
-| **Search type** | `PTR` (RIP-relative) |
-| **Last verified** | 2024-XX-XX (placeholder) |
+| **Search type** | `PTR` (RIP-relative, 3-byte prefix before displacement) |
+| **Last verified** | 2026-04-09 |
 
 **How to find in IDA/Ghidra:**
 1. Open `rendersystemdx11.dll`.
-2. Search for `"CRenderDeviceDx11"` or DX11 initialization strings.
-3. Look for MOVDQA stores (`66 0F 7F`) to global memory — these are SSE stores of swap chain data.
-4. The first `66 0F 7F 05` stores to the swap chain pointer location.
-5. The `48 89 35` at the end is a `mov [rip+disp], rsi` storing a related pointer.
+2. Search for strings around `"CRenderDeviceDx11"` or DX11 initialization code.
+3. Look for a `mov [rip+disp], rbp` instruction (`48 89 2D`) that stores the swap chain pointer to a global — this is `ISwapChainDx11*`.
+4. Immediately after that, there is a `movdqa [rip+disp], xmm0` (`66 0F 7F 05`) storing XMM state.
+
+> **Why not `66 0F 7F 05`?** The MOVDQA opcode is 4 bytes (`66 0F 7F 05`), but `ESearchType::PTR` uses
+> `GetAbsoluteAddress(addr, 3, 7)` — 3-byte opcode + 4-byte displacement. Using MOVDQA directly
+> would read the wrong displacement. The `48 89 2D` instruction before it is a 3-byte opcode, so
+> we match that instead.
 
 **What it looks like:**
 ```asm
-66 0F 7F 05 XX XX XX XX  ; movdqa [rip+ISwapChainDx11], xmm0
-66 0F 7F 0D XX XX XX XX  ; movdqa [rip+??], xmm1
-48 89 35 XX XX XX XX      ; mov [rip+??], rsi
+48 89 2D XX XX XX XX     ; mov [rip+ISwapChainDx11], rbp
+66 0F 7F 05 XX XX XX XX  ; movdqa [rip+??], xmm0
 ```
 
 ---
 
-### SwapChain (in hooks.cpp)
+### SwapChain (secondary hook path)
 
 | Field         | Value |
 |---------------|-------|
-| **Pattern**   | `48 8B 0D ? ? ? ? 48 85 C9 74 ? 8B 41` |
+| **Pattern**   | `48 8B 0D ? ? ? ? 48 85 C9 74 ? FF` |
 | **Module**    | `rendersystemdx11.dll` |
-| **Resolves to** | `CSwapChainDx11*` — used to obtain `IDXGISwapChain` at offset `+0x170` |
+| **Resolves to** | `CSwapChainDx11*` — used to obtain `IDXGISwapChain` for vtable hook |
 | **Search type** | `PTR` (RIP-relative) |
-| **Last verified** | 2024-XX-XX (placeholder) |
+| **Last verified** | 2026-04-09 |
+
+**⚠️ This is the SECONDARY hook path.** The primary path is `PRESENT_OVERLAY` in `gameoverlayrenderer64.dll`.
+This pattern was previously `48 8B 0D ? ? ? ? 48 85 C9 74 ? 8B 41` — the trailing `8B 41` bytes changed in the current CS2 build.
 
 **How to find in IDA/Ghidra:**
 1. Open `rendersystemdx11.dll`.
-2. Look for code that accesses the swap chain object and tests it for null.
-3. The pattern is: load pointer → test null → access member. The `74 ?` is a `jz` (jump if zero = null check).
-4. The `8B 41` is `mov eax, [rcx+??]` accessing a member after the null check.
+2. Look for code that loads the swap chain pointer, null-checks it (`test rcx, rcx; jz skip`), and then calls a method on it (`FF 50 ?? = call [rax+??]`).
+3. The pattern: load global rcx → null test → jz → virtual call.
 
 **What it looks like:**
 ```asm
 48 8B 0D XX XX XX XX    ; mov rcx, [rip+SwapChainObj]
 48 85 C9                ; test rcx, rcx
 74 ??                   ; jz skip
-8B 41 ??                ; mov eax, [rcx+??]
+FF ??                   ; call [rax+??] or call [rcx+??]
 ```
 
 ---
@@ -239,7 +249,7 @@ ViewMatrix* __fastcall GetMatrixForView(void* pRenderGameSystem, void* pViewRend
 | **Module**    | `client.dll` |
 | **Resolves to** | Level initialization handler — called on map load |
 | **Search type** | `NONE` (direct match) |
-| **Last verified** | 2024-XX-XX (placeholder) |
+| **Last verified** | 2026-04-09 |
 
 **How to find in IDA/Ghidra:**
 1. Open `client.dll`.
@@ -250,7 +260,69 @@ ViewMatrix* __fastcall GetMatrixForView(void* pRenderGameSystem, void* pViewRend
 
 ---
 
-### LevelShutdown
+### Present Hook (Primary — GameOverlayRenderer)
+
+| Field         | Value |
+|---------------|-------|
+| **Pattern**   | `48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC ? 41 8B E8` |
+| **Module**    | `gameoverlayrenderer64.dll` |
+| **Resolves to** | Steam overlay's `Present` wrapper — the best hook site for D3D11 rendering |
+| **Search type** | `NONE` (direct match) |
+| **Last verified** | 2026-04-09 |
+
+**Why use this instead of IDXGISwapChain vtable?**  
+The Steam overlay already hooks `IDXGISwapChain::Present` internally. By hooking this Steam
+wrapper directly, we avoid fighting with it for the vtable slot and get the `IDXGISwapChain*`
+as the first argument (`rcx`) at call time.
+
+**How to find in IDA/Ghidra:**
+1. Open `gameoverlayrenderer64.dll` (loaded at Steam game startup).
+2. Search for a function that saves `rbx, rbp, rsi, rdi, r12, r13, r14` and has `41 8B E8` near the prologue.
+3. This is the wrapper that the overlay injected around `IDXGISwapChain::Present`.
+4. Alternatively: xref from the DXGI vtable hook site in the DLL.
+
+**What it looks like:**
+```asm
+48 89 5C 24 ??           ; mov [rsp+??], rbx
+48 89 6C 24 ??           ; mov [rsp+??], rbp
+56 57                    ; push rsi; push rdi
+41 54 41 56 41 57        ; push r12; push r14; push r15
+48 83 EC ??              ; sub rsp, ??
+41 8B E8                 ; mov ebp, r8d    ; SyncInterval arg
+```
+
+---
+
+### SetLocalPlayerReady
+
+| Field         | Value |
+|---------------|-------|
+| **Pattern**   | `48 83 EC ? 4C 8B 05 ? ? ? ? 0F B6 D1` |
+| **Module**    | `client.dll` |
+| **Resolves to** | Marks local player as ready (used in buy phase / warmup) |
+| **Search type** | `CALL` or `NONE` |
+| **Last verified** | 2026-04-09 |
+
+> **Pattern changed:** Previously `48 83 EC ? 48 8B 05 ? ? ? ? 0F B6 D1` using `mov rax, [rip+X]` (`48 8B 05`).
+> In the current CS2 build the compiler uses `mov r8, [rip+X]` (`4C 8B 05`) — r8 instead of rax.
+
+**How to find in IDA/Ghidra:**
+1. Open `client.dll`.
+2. Search for `"IsLocalPlayerReady"` or `"SetLocalPlayerReady"`.
+3. The function takes a `bool` parameter (`cl` register), converts it with `movzx edx, cl`, loads a global object pointer into r8/rax, then calls a virtual function on it.
+4. Function found at `client.dll+0x8CB420` in the current build.
+
+**What it looks like:**
+```asm
+48 83 EC ??              ; sub rsp, ??          (prologue)
+4C 8B 05 XX XX XX XX     ; mov r8, [rip+CCSGOInput]  (changed from 48 8B 05)
+0F B6 D1                 ; movzx edx, cl        (bReady bool arg)
+49 8B C8                 ; mov rcx, r8          (this ptr)
+49 8B 00                 ; mov rax, [r8]        (load vtable)
+FF 50 40                 ; call [rax+40h]       (virtual call)
+```
+
+---
 
 | Field         | Value |
 |---------------|-------|
@@ -293,9 +365,14 @@ These are hardcoded offsets defined in `src/core/patterns.h` under `PATTERNS::OF
 
 | Offset | Used in | Description | How to verify |
 |--------|---------|-------------|---------------|
-| `+0x170` | `interfaces.cpp`, `hooks.cpp` | `IDXGISwapChain*` inside `ISwapChainDx11` | In `rendersystemdx11.dll`, find the swap chain class and check where `IDXGISwapChain::Present` is called from the object pointer. |
-| `+0x58` | `interfaces.cpp` | `CGameEntitySystem*` inside `IGameResourceService` | In `engine2.dll`, find `GameResourceServiceClientV001` and check the member at offset 0x58 — it should be a pointer to the entity system. |
-| `+0x558` | `schema.cpp` | `CUtlTSHash` inside `CSchemaSystemTypeScope` | In `schemasystem.dll`, examine `FindTypeScopeForModule`'s return value; the hash table of declared classes starts at this offset. May be `0x5B8` on some builds. |
+| `+0x58` | `interfaces.cpp` | `CGameEntitySystem*` inside `IGameResourceService` | In `engine2.dll`, find `GameResourceServiceClientV001` and check member at 0x58 — should be entity system ptr. |
+| `+0x5C0` | `schema.cpp` | `CUtlTSHash` bucket array inside `CSchemaSystemTypeScope` | In `schemasystem.dll`, examine `FindTypeScopeForModule` return value; the CUtlMemoryPool header is 0x38 bytes at 0x588, so bucket array starts at 0x5C0. 256 buckets. |
+| `+0x28` | `schema.cpp` | `pFields` pointer inside `SchemaClassInfoData_t` | Schema class field array. Was at 0x24 in older builds — verify by checking the struct layout in schemasystem.dll vtable dump. |
+| `+0x8` | `schema.cpp` | `szBinaryName` in `CSchemaClassBinding` | Binary (module) name string. |
+| `+0x18` | `schema.cpp` | `pFirst` in `HashBucket_t` | First node pointer in the TSHash bucket linked list. |
+
+> **Removed:** `+0x170` (IDXGISwapChain* inside ISwapChainDx11) is no longer used — D3D device is
+> resolved lazily inside the Present hook callback, not by reading from the swap chain object.
 
 ---
 
@@ -371,4 +448,4 @@ If a `CreateInterface` capture fails, the version string may have changed. Check
 
 ---
 
-*Last full update: 2024-XX-XX — Update this date whenever all patterns are re-verified.*
+*Last full update: 2026-04-09 — All 5 interface patterns + Present hook + SetLocalPlayerReady re-verified against current CS2 build.*

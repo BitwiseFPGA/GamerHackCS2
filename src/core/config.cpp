@@ -116,7 +116,7 @@ static Color ParseColorArray(const char*& p)
 
 std::filesystem::path C::GetConfigDirectory()
 {
-	// try Documents/FAGHack/
+	// try Documents/GamerHack/
 	wchar_t wszDocuments[MAX_PATH];
 	if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, SHGFP_TYPE_CURRENT, wszDocuments)))
 	{

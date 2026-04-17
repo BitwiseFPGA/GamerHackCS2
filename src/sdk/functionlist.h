@@ -28,6 +28,7 @@ class CBaseHandle;
 class C_CSWeaponBase;
 class C_CSWeaponBaseGun;
 class CSOEconItem;
+class CUserCmd;
 struct Vector3;
 struct QAngle;
 struct Ray_t;
@@ -45,6 +46,11 @@ struct Ray_t;
     inline fn_##Name Name = nullptr;
 
 namespace SDK_FUNC {
+    // --- Engine State ---
+    DECLARE_SDK_FUNCTION(bool, IsInGame, void*);
+    DECLARE_SDK_FUNCTION(const char*, GetLevelName, void*);
+    DECLARE_SDK_FUNCTION(const char*, GetLevelNameShort, void*);
+
     // --- Entity System ---
     DECLARE_SDK_FUNCTION(void*, GetBaseEntity, CGameEntitySystem*, int);
     DECLARE_SDK_FUNCTION(CCSPlayerController*, GetLocalPlayerController, int);
@@ -75,7 +81,12 @@ namespace SDK_FUNC {
 
     // --- Input/View ---
     DECLARE_SDK_FUNCTION(QAngle*, GetViewAngles, CCSGOInput*, int32_t);
-    DECLARE_SDK_FUNCTION(void, SetViewAngles, CCSGOInput*, int32_t, QAngle*);
+    DECLARE_SDK_FUNCTION(void, SetViewAngles, CCSGOInput*, int32_t, QAngle&);
+
+    // --- CUserCmd acquisition (Andromeda-style) ---
+    DECLARE_SDK_FUNCTION(void, GetCUserCmdTick, CCSPlayerController*, int32_t*);
+    DECLARE_SDK_FUNCTION(void*, GetCUserCmdArray, void*, int32_t);
+    DECLARE_SDK_FUNCTION(CUserCmd*, GetCUserCmdBySequenceNumber, CCSPlayerController*, uint32_t);
 
     // --- Visual ---
     DECLARE_SDK_FUNCTION(bool, ScreenTransform, const Vector3&, Vector3&);

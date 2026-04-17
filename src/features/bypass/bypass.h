@@ -42,6 +42,4 @@ namespace F::BYPASS
 
 	// internal state
 	inline std::vector<SubTickEntry> vecSubTicks;
-	inline QAngle angBackupViewAngles = {};
-	inline bool bShouldRestoreAngles = false;
 }
