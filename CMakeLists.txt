@@ -112,10 +112,14 @@ set(SOURCES_FEATURES
     src/features/legitbot/legitbot_core.cpp
     src/features/legitbot/legitbot_math.cpp
     src/features/legitbot/legitbot_targeting.cpp
+    src/features/legitbot/legitbot_autowall.cpp
+    src/features/legitbot/legitbot_triggerbot.cpp
+    src/features/ragebot/ragebot.cpp
     src/features/misc/misc.cpp
     src/features/misc/misc_camera.cpp
     src/features/misc/misc_core.cpp
     src/features/misc/misc_effects.cpp
+    src/features/misc/misc_engpred.cpp
     src/features/misc/misc_movement.cpp
     src/features/visuals/esp.cpp
     src/features/visuals/radar.cpp

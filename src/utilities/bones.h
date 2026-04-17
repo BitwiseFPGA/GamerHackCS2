@@ -9,6 +9,9 @@ namespace BONES
 	// get world-space position of a bone by index
 	bool GetBonePosition(C_CSPlayerPawn* pPawn, int nBoneIndex, Vector3& outPos);
 
+	// get world-space position of a bone by name (reference-code-1 style)
+	Vector3 GetBonePositionByName(C_CSPlayerPawn* pPawn, const char* szBoneName);
+
 	// calculate world-space bones (force update if needed)
 	void CalcWorldSpaceBones(CSkeletonInstance* pSkeleton, uint32_t nBoneMask);
 

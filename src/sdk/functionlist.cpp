@@ -90,7 +90,7 @@ bool SDK_FUNC::Initialize()
 
     // --- Bones ---
     RESOLVE(CalcWorldSpaceBones, CLIENT, PATTERNS::FUNCTIONS::CALC_WORLD_SPACE_BONES);
-    RESOLVE(GetBoneIdByName, CLIENT, PATTERNS::FUNCTIONS::GET_BONE_ID_BY_NAME);
+    RESOLVE(GetBoneIdByName, CLIENT, PATTERNS::FUNCTIONS::GET_BONE_ID_BY_NAME, MEM::ESearchType::CALL);
 
     // --- Entity Utilities ---
     RESOLVE(ComputeHitboxSurroundingBox, CLIENT,

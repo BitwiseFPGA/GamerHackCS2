@@ -29,6 +29,36 @@ C_ADD_VARIABLE(int,   aimbot_key,          0x05);    // VK_XBUTTON1 (Mouse4)
 C_ADD_VARIABLE(bool,  aimbot_always_on,    false);
 C_ADD_VARIABLE(int,   aimbot_target_filter, 0);      // 0=closest angle, 1=lowest health, 2=closest distance
 C_ADD_VARIABLE(bool,  aimbot_rcs,          false);    // recoil compensation
+C_ADD_VARIABLE(bool,  aimbot_team_check,   true);     // only target enemies (skip teammates)
+
+// ---- ragebot ----
+C_ADD_VARIABLE(bool,  rage_enabled,          false);
+C_ADD_VARIABLE(int,   rage_key,              0x05);    // VK_XBUTTON1 (Mouse4)
+C_ADD_VARIABLE(bool,  rage_always_on,        false);
+C_ADD_VARIABLE(bool,  rage_silent,           true);
+C_ADD_VARIABLE(bool,  rage_auto_shoot,       true);
+C_ADD_VARIABLE(bool,  rage_auto_stop,        true);
+C_ADD_VARIABLE(bool,  rage_auto_scope,       true);
+C_ADD_VARIABLE(bool,  rage_team_check,       true);
+C_ADD_VARIABLE(float, rage_min_damage,       10.0f);   // minimum damage to shoot
+C_ADD_VARIABLE(bool,  rage_multipoint,       true);
+C_ADD_VARIABLE(float, rage_multipoint_scale, 70.0f);   // 0-100 point spread scale
+C_ADD_VARIABLE(bool,  rage_hitbox_head,      true);
+C_ADD_VARIABLE(bool,  rage_hitbox_chest,     true);
+C_ADD_VARIABLE(bool,  rage_hitbox_stomach,   false);
+C_ADD_VARIABLE(bool,  rage_hitbox_pelvis,    false);
+
+// ---- triggerbot ----
+C_ADD_VARIABLE(bool,  triggerbot_enabled,       false);
+C_ADD_VARIABLE(int,   triggerbot_key,           0x06);   // VK_XBUTTON2 (Mouse5)
+C_ADD_VARIABLE(bool,  triggerbot_always_on,     false);
+C_ADD_VARIABLE(bool,  triggerbot_team_check,    true);
+C_ADD_VARIABLE(bool,  triggerbot_visible_only,  true);
+C_ADD_VARIABLE(float, triggerbot_delay,         0.0f);   // ms delay before firing
+C_ADD_VARIABLE(float, triggerbot_delay_rand,    0.0f);   // random ms added to delay
+C_ADD_VARIABLE(int,   triggerbot_hitgroup,      0);      // 0=any, 1=head, 2=chest, 3=stomach
+C_ADD_VARIABLE(int,   triggerbot_hold_min,      1);      // minimum ticks to hold fire
+C_ADD_VARIABLE(int,   triggerbot_hold_max,      4);      // maximum ticks to hold fire
 
 // ---- ESP ----
 C_ADD_VARIABLE(bool,  esp_enabled,     false);
@@ -38,15 +68,21 @@ C_ADD_VARIABLE(bool,  esp_name,        true);
 C_ADD_VARIABLE(bool,  esp_health,      true);
 C_ADD_VARIABLE(bool,  esp_armor,       false);
 C_ADD_VARIABLE(bool,  esp_weapon,      true);
+C_ADD_VARIABLE(bool,  esp_dropped_items, false);
 C_ADD_VARIABLE(bool,  esp_snaplines,   false);
 C_ADD_VARIABLE(int,   esp_box_type,    0);           // 0 = normal, 1 = corner
 C_ADD_VARIABLE(Color, esp_box_color_t,  Color(255, 0, 0));
 C_ADD_VARIABLE(Color, esp_box_color_ct, Color(0, 100, 255));
 C_ADD_VARIABLE(Color, esp_name_color,   Color(255, 255, 255, 230));
 C_ADD_VARIABLE(Color, esp_weapon_color, Color(220, 220, 220, 210));
+C_ADD_VARIABLE(Color, esp_dropped_item_color, Color(255, 220, 140, 230));
 C_ADD_VARIABLE(Color, esp_armor_color,  Color(0, 128, 255, 255));
 C_ADD_VARIABLE(Color, esp_snapline_color_t,  Color(255, 100, 100, 160));
 C_ADD_VARIABLE(Color, esp_snapline_color_ct, Color(100, 170, 255, 160));
+C_ADD_VARIABLE(bool, esp_skeleton, false);
+C_ADD_VARIABLE(Color, esp_skeleton_color_t, Color(255, 150, 150));
+C_ADD_VARIABLE(Color, esp_skeleton_color_ct, Color(150, 150, 255));
+C_ADD_VARIABLE(float, esp_skeleton_thickness, 1.5f);
 
 // ---- glow ----
 C_ADD_VARIABLE(bool,  glow_enabled,   false);
@@ -56,6 +92,8 @@ C_ADD_VARIABLE(Color, glow_color_ct,  Color(50, 50, 255));
 // ---- misc ----
 C_ADD_VARIABLE(bool,  misc_bhop,                 false);
 C_ADD_VARIABLE(bool,  misc_autostrafe,           false);
+C_ADD_VARIABLE(float, misc_strafe_smooth,        50.0f);  // 1-100, smoothness of air strafe
+C_ADD_VARIABLE(bool,  misc_auto_stop,            false);  // standalone auto stop (also triggered by ragebot)
 C_ADD_VARIABLE(bool,  misc_noflash,              false);
 C_ADD_VARIABLE(float, misc_noflash_alpha,        0.0f);
 C_ADD_VARIABLE(bool,  misc_thirdperson,          false);

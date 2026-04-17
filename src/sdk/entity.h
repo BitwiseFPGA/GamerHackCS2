@@ -21,6 +21,7 @@
 // ---------------------------------------------------------------
 class CGameEntitySystem;
 struct SchemaClassInfoData_t;
+struct CSchemaClassBinding;
 class C_BaseEntity;
 class CEntityInstance;
 class CEconItem;
@@ -284,7 +285,7 @@ public:
 
 	CSkeletonInstance* GetSkeletonInstance()
 	{
-		return MEM::CallVFunc<CSkeletonInstance*, 8U>(this);
+		return reinterpret_cast<CSkeletonInstance*>(this);
 	}
 
 	void SetMeshGroupMask(std::uint64_t uMeshGroupMask);
@@ -297,6 +298,8 @@ public:
 class CSkeletonInstance : public CGameSceneNode
 {
 public:
+	using CGameSceneNode::GetBonePosition;
+
 	[[nodiscard]] int GetBoneCount()
 	{
 		CStrongHandle<CModel> hModel = GetModelState().GetModel();

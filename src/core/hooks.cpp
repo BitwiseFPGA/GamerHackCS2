@@ -489,7 +489,7 @@ bool __fastcall H::CreateMove(CCSGOInput* pInput, uint32_t nSlot, char a3)
 
 	static int nCMFrame = 0;
 	nCMFrame++;
-	const bool bCMDiag = (nCMFrame <= 5) || (nCMFrame % 500 == 0);
+	const bool bCMDiag = (nCMFrame <= 5);
 
 	CUserCmd* pCmd = SafeAcquireCUserCmd(pInput, bCMDiag);
 
@@ -589,6 +589,9 @@ void __fastcall H::OverrideView(void* pClientModeCSNormal, void* pViewSetup)
 	static bool bFirstCall = true;
 	if (bFirstCall) { bFirstCall = false; L_PRINT(LOG_INFO) << _XS("[hook] OverrideView first call"); }
 
+	// call original FIRST so game sets up the view, then we modify it
+	oOverrideView(pClientModeCSNormal, pViewSetup);
+
 	// SEH-protect feature dispatch — if MISC::OnOverrideView faults, game continues
 	__try
 	{
@@ -599,8 +602,6 @@ void __fastcall H::OverrideView(void* pClientModeCSNormal, void* pViewSetup)
 		static bool bLogged = false;
 		if (!bLogged) { bLogged = true; L_PRINT(LOG_ERROR) << _XS("[hook] OverrideView feature dispatch faulted"); }
 	}
-
-	oOverrideView(pClientModeCSNormal, pViewSetup);
 }
 
 void* __fastcall H::LevelInit(void* pClientModeShared, const char* szNewMap)

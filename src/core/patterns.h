@@ -175,8 +175,8 @@ namespace PATTERNS {
         constexpr const char* PVS = "48 8D 0D ? ? ? ? 33 ? FF 50";
 
         // --- Bones ---
-        constexpr const char* CALC_WORLD_SPACE_BONES = "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B";
-        constexpr const char* GET_BONE_ID_BY_NAME = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B F0 48 8B EA 48 8B D9 E8";
+        constexpr const char* CALC_WORLD_SPACE_BONES = "48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 B8 ? ? ? ? E8 ? ? ? ? 48 2B E0 48 8D 6C 24 ? 48 8B 81";
+        constexpr const char* GET_BONE_ID_BY_NAME = "E8 ? ? ? ? 48 8B CF 85 C0 78 ? 44 8B C0";
 
         // --- Visual ---
         constexpr const char* SCREEN_TRANSFORM = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B E8 48 8B DA";
@@ -188,7 +188,8 @@ namespace PATTERNS {
 
         // --- Trace ---
         constexpr const char* TRACE_SHAPE = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B 71";
-        constexpr const char* TRACE_FILTER_CTOR = "48 89 5C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 40";
+        // Andromeda-verified pattern for CTraceFilter constructor
+        constexpr const char* TRACE_FILTER_CTOR = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 0F B6 41 ? 33 FF 24";
 
         // --- HUD ---
         constexpr const char* FIND_HUD_ELEMENT = "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 49 8B F0 48 8B DA 48 8B F9 E8";

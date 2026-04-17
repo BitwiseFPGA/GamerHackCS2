@@ -103,6 +103,8 @@ const Vector3& C_BaseEntity::GetOrigin()
 
 bool CGameSceneNode::GetBonePosition(std::int32_t nBoneIndex, Vector3& vecBonePos)
 {
+	vecBonePos = {};
+
 	CSkeletonInstance* pSkeleton = GetSkeletonInstance();
 	if (!pSkeleton || nBoneIndex < 0)
 		return false;
@@ -110,13 +112,6 @@ bool CGameSceneNode::GetBonePosition(std::int32_t nBoneIndex, Vector3& vecBonePo
 	const int nBoneCount = pSkeleton->GetBoneCount();
 	if (nBoneIndex >= nBoneCount)
 		return false;
-
-	if (Matrix2x4* pBoneCache = pSkeleton->GetBoneCache(); pBoneCache != nullptr)
-	{
-		vecBonePos = pBoneCache->GetOrigin(nBoneIndex);
-		if (!vecBonePos.IsZero())
-			return true;
-	}
 
 	CModelState& modelState = pSkeleton->GetModelState();
 	CBoneData* pBones = modelState.m_pBones;
@@ -152,34 +147,10 @@ bool C_BaseEntity::ComputeHitboxSurroundingBox(Vector3* pMins, Vector3* pMaxs)
 
 int C_BaseEntity::GetBoneIdByName(const char* szName)
 {
-	if (SDK_FUNC::GetBoneIdByName && szName && szName[0] != '\0')
-	{
-		const int nBoneIndex = SDK_FUNC::GetBoneIdByName(this, szName);
-		if (nBoneIndex != -1)
-			return nBoneIndex;
-	}
-
-	CGameSceneNode* pGameSceneNode = GetGameSceneNode();
-	if (!pGameSceneNode)
+	if (!SDK_FUNC::GetBoneIdByName || !szName)
 		return -1;
 
-	CSkeletonInstance* pSkeleton = pGameSceneNode->GetSkeletonInstance();
-	if (!pSkeleton)
-		return -1;
-
-	CModelState& modelState = pSkeleton->GetModelState();
-	CStrongHandle<CModel> hModel = modelState.GetModel();
-	CModel* pModel = static_cast<CModel*>(hModel);
-	if (!pModel || !pModel->m_szBoneNames)
-		return -1;
-
-	for (std::uint32_t i = 0; i < pModel->m_nBoneCount; ++i)
-	{
-		if (pModel->m_szBoneNames[i] && std::strcmp(pModel->m_szBoneNames[i], szName) == 0)
-			return static_cast<int>(i);
-	}
-
-	return -1;
+	return SDK_FUNC::GetBoneIdByName(this, szName);
 }
 
 // ---------------------------------------------------------------
@@ -311,4 +282,12 @@ CCSWeaponBaseVData* C_EconItemView::GetBasePlayerWeaponVData()
 	if (!SDK_FUNC::C_EconItemView_GetBasePlayerWeaponVData)
 		return nullptr;
 	return SDK_FUNC::C_EconItemView_GetBasePlayerWeaponVData(this);
+}
+
+void CSkeletonInstance::CalcWorldSpaceBones(unsigned int nMask)
+{
+	if (!SDK_FUNC::CalcWorldSpaceBones)
+		return;
+
+	return SDK_FUNC::CalcWorldSpaceBones(this, nMask);
 }

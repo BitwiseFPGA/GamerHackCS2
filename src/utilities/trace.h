@@ -14,8 +14,9 @@ namespace TRACE
 	void Destroy();
 
 	// basic visibility check (point to point)
+	// pTargetEntity: if provided, returns true if the trace hits this entity (even if fraction < 0.97)
 	bool IsVisible(const Vector3& vecStart, const Vector3& vecEnd,
-	               C_CSPlayerPawn* pSkipEntity = nullptr);
+	               C_CSPlayerPawn* pSkipEntity = nullptr, C_BaseEntity* pTargetEntity = nullptr);
 
 	// check if a specific bone on a player is visible from local player's eye
 	bool IsBoneVisible(C_CSPlayerPawn* pLocalPawn, C_CSPlayerPawn* pTargetPawn,
@@ -30,6 +31,11 @@ namespace TRACE
 	// generic trace (returns full trace result)
 	bool TraceShape(const Vector3& vecStart, const Vector3& vecEnd,
 	                C_CSPlayerPawn* pSkipEntity, GameTrace_t* pOutTrace);
+
+	// entity-specific clip trace used to verify player intersection on a ray
+	bool ClipRayToPlayer(const Vector3& vecStart, const Vector3& vecEnd,
+	                     C_CSPlayerPawn* pSkipEntity, C_CSPlayerPawn* pTargetPawn,
+	                     GameTrace_t* pOutTrace = nullptr);
 
 	// bone names used for multi-point visibility checking
 	inline constexpr int VISCHECK_BONE_HEAD   = 6;

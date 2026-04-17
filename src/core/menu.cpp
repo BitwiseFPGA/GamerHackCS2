@@ -358,6 +358,7 @@ struct TabDef
 
 // forward declarations for tab render functions
 static void RenderAimbotTab();
+static void RenderRagebotTab();
 static void RenderVisualsTab();
 static void RenderMiscTab();
 static void RenderInventoryTab();
@@ -366,6 +367,7 @@ static void RenderSettingsTab();
 
 static const TabDef g_tabs[] = {
 	{ "Aimbot",    RenderAimbotTab },
+	{ "Ragebot",   RenderRagebotTab },
 	{ "Visuals",   RenderVisualsTab },
 	{ "Misc",      RenderMiscTab },
 	{ "Inventory", RenderInventoryTab },
@@ -379,9 +381,11 @@ static constexpr int TAB_COUNT = sizeof(g_tabs) / sizeof(g_tabs[0]);
 // =================================================================
 static void RenderAimbotTab()
 {
+	const float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
 	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 
-	ImGui::BeginChild("##aim_main", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	// left column — aimbot
+	ImGui::BeginChild("##aim_left", ImVec2(halfW, 0), ImGuiChildFlags_Borders);
 	{
 		MENU::Separator("Aimbot");
 		MENU::Checkbox("Enable##aim", &C::Get<bool>(aimbot_enabled));
@@ -411,6 +415,8 @@ static void RenderAimbotTab()
 		MENU::Checkbox("Visible Only", &C::Get<bool>(aimbot_visible_only));
 		MENU::Checkbox("Recoil Compensation", &C::Get<bool>(aimbot_rcs));
 		MENU::Tooltip("Compensate for weapon recoil when aiming");
+		MENU::Checkbox("Team Check##aim", &C::Get<bool>(aimbot_team_check));
+		MENU::Tooltip("Only target enemies, not teammates");
 
 		static const char* filterNames[] = { "Closest Angle", "Lowest Health", "Closest Distance" };
 		MENU::Combo("Target Filter", &C::Get<int>(aimbot_target_filter), filterNames, 3);
@@ -420,6 +426,127 @@ static void RenderAimbotTab()
 		ImGui::BeginDisabled(C::Get<bool>(aimbot_always_on));
 		ImGui::Text("Aim Key:");
 		MENU::KeyBind("aimkey", &C::Get<int>(aimbot_key));
+		ImGui::EndDisabled();
+
+		ImGui::EndDisabled();
+	}
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+
+	// right column — triggerbot
+	ImGui::BeginChild("##aim_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Triggerbot");
+		MENU::Checkbox("Enable##trig", &C::Get<bool>(triggerbot_enabled));
+		MENU::Checkbox("Always On##trig", &C::Get<bool>(triggerbot_always_on));
+		MENU::Tooltip("Fire without holding a key");
+
+		ImGui::Spacing();
+
+		ImGui::BeginDisabled(!C::Get<bool>(triggerbot_enabled));
+
+		MENU::Checkbox("Team Check##trig", &C::Get<bool>(triggerbot_team_check));
+		MENU::Tooltip("Only shoot enemies, not teammates");
+
+		MENU::Checkbox("Visible Only##trig", &C::Get<bool>(triggerbot_visible_only));
+		MENU::Tooltip("Only fire when target is visible (not through walls)");
+
+		MENU::SliderFloat("Delay (ms)", &C::Get<float>(triggerbot_delay), 0.0f, 500.0f, "%.0f");
+		MENU::Tooltip("Delay before firing in milliseconds");
+
+		MENU::SliderFloat("Randomization (ms)", &C::Get<float>(triggerbot_delay_rand), 0.0f, 200.0f, "%.0f");
+		MENU::Tooltip("Random additional delay to appear more human");
+
+		static const char* hitgroupNames[] = { "Any", "Head Only", "Chest Only", "Stomach Only" };
+		MENU::Combo("Hitgroup Filter", &C::Get<int>(triggerbot_hitgroup), hitgroupNames, 4);
+		MENU::Tooltip("Only fire when crosshair is on specific body part");
+
+		ImGui::Spacing();
+		ImGui::Text("Hold Randomization");
+		MENU::SliderInt("Hold Min (ticks)", &C::Get<int>(triggerbot_hold_min), 1, 10);
+		MENU::Tooltip("Minimum ticks to hold fire button down");
+		MENU::SliderInt("Hold Max (ticks)", &C::Get<int>(triggerbot_hold_max), 1, 15);
+		MENU::Tooltip("Maximum ticks to hold fire button — avoids 1-tick shots");
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(C::Get<bool>(triggerbot_always_on));
+		ImGui::Text("Trigger Key:");
+		MENU::KeyBind("trigkey", &C::Get<int>(triggerbot_key));
+		ImGui::EndDisabled();
+
+		ImGui::EndDisabled();
+	}
+	ImGui::EndChild();
+
+	ImGui::PopStyleVar();
+}
+
+// ---------------------------------------------------------------
+// Ragebot tab
+// ---------------------------------------------------------------
+static void RenderRagebotTab()
+{
+	const float halfW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+
+	// left column — general settings
+	ImGui::BeginChild("##rage_left", ImVec2(halfW, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Ragebot");
+		MENU::Checkbox("Enable##rage", &C::Get<bool>(rage_enabled));
+		MENU::Checkbox("Always On##rage", &C::Get<bool>(rage_always_on));
+		MENU::Tooltip("Run ragebot without holding a key");
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(!C::Get<bool>(rage_enabled));
+
+		MENU::Checkbox("Silent Aim", &C::Get<bool>(rage_silent));
+		MENU::Tooltip("Aim without moving your camera");
+		MENU::Checkbox("Auto Shoot", &C::Get<bool>(rage_auto_shoot));
+		MENU::Tooltip("Automatically fire when target is valid");
+		MENU::Checkbox("Auto Stop", &C::Get<bool>(rage_auto_stop));
+		MENU::Tooltip("Counter-strafe before shooting for accuracy");
+		MENU::Checkbox("Auto Scope", &C::Get<bool>(rage_auto_scope));
+		MENU::Tooltip("Automatically scope sniper rifles");
+		MENU::Checkbox("Team Check##rage", &C::Get<bool>(rage_team_check));
+
+		ImGui::Spacing();
+		MENU::Separator("Autowall");
+		MENU::SliderFloat("Min Damage", &C::Get<float>(rage_min_damage), 1.0f, 100.0f, "%.0f");
+		MENU::Tooltip("Minimum damage required to shoot (autowall checks through walls)");
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(C::Get<bool>(rage_always_on));
+		ImGui::Text("Rage Key:");
+		MENU::KeyBind("ragekey", &C::Get<int>(rage_key));
+		ImGui::EndDisabled();
+
+		ImGui::EndDisabled();
+	}
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+
+	// right column — hitbox + multipoint
+	ImGui::BeginChild("##rage_right", ImVec2(0, 0), ImGuiChildFlags_Borders);
+	{
+		MENU::Separator("Hitboxes");
+		ImGui::BeginDisabled(!C::Get<bool>(rage_enabled));
+
+		MENU::Checkbox("Head",    &C::Get<bool>(rage_hitbox_head));
+		MENU::Checkbox("Chest",   &C::Get<bool>(rage_hitbox_chest));
+		MENU::Checkbox("Stomach", &C::Get<bool>(rage_hitbox_stomach));
+		MENU::Checkbox("Pelvis",  &C::Get<bool>(rage_hitbox_pelvis));
+
+		ImGui::Spacing();
+		MENU::Separator("Multipoint");
+		MENU::Checkbox("Enable##mp", &C::Get<bool>(rage_multipoint));
+		MENU::Tooltip("Scan multiple points per hitbox to find a shootable spot");
+
+		ImGui::BeginDisabled(!C::Get<bool>(rage_multipoint));
+		MENU::SliderFloat("Point Scale", &C::Get<float>(rage_multipoint_scale), 10.0f, 100.0f, "%.0f%%");
+		MENU::Tooltip("Higher = more spread out points, lower = closer to center");
 		ImGui::EndDisabled();
 
 		ImGui::EndDisabled();
@@ -465,11 +592,21 @@ static void RenderVisualsTab()
 		MENU::Checkbox("Weapon", &C::Get<bool>(esp_weapon));
 		if (C::Get<bool>(esp_weapon))
 			MENU::ColorEdit("Weapon Color", &C::Get<Color>(esp_weapon_color));
+		MENU::Checkbox("Dropped Items", &C::Get<bool>(esp_dropped_items));
+		if (C::Get<bool>(esp_dropped_items))
+			MENU::ColorEdit("Dropped Item Color", &C::Get<Color>(esp_dropped_item_color));
 		MENU::Checkbox("Snaplines", &C::Get<bool>(esp_snaplines));
 		if (C::Get<bool>(esp_snaplines))
 		{
 			MENU::ColorEdit("T Color##snapline", &C::Get<Color>(esp_snapline_color_t));
 			MENU::ColorEdit("CT Color##snapline", &C::Get<Color>(esp_snapline_color_ct));
+		}
+		MENU::Checkbox("Skeleton", &C::Get<bool>(esp_skeleton));
+		if (C::Get<bool>(esp_skeleton))
+		{
+			MENU::ColorEdit("T Color##skeleton", &C::Get<Color>(esp_skeleton_color_t));
+			MENU::ColorEdit("CT Color##skeleton", &C::Get<Color>(esp_skeleton_color_ct));
+			MENU::SliderFloat("Skeleton Thickness", &C::Get<float>(esp_skeleton_thickness), 1.0f, 5.0f);
 		}
 
 		ImGui::EndDisabled();
@@ -611,6 +748,12 @@ static void RenderMiscTab()
 		MENU::Separator("Movement");
 		MENU::Checkbox("Bunny Hop", &C::Get<bool>(misc_bhop));
 		MENU::Checkbox("Auto Strafe", &C::Get<bool>(misc_autostrafe));
+		ImGui::BeginDisabled(!C::Get<bool>(misc_autostrafe));
+		MENU::SliderFloat("Strafe Smooth", &C::Get<float>(misc_strafe_smooth), 1.0f, 100.0f, "%.0f");
+		MENU::Tooltip("Air strafe smoothness (1=sharp, 100=smooth)");
+		ImGui::EndDisabled();
+		MENU::Checkbox("Auto Stop", &C::Get<bool>(misc_auto_stop));
+		MENU::Tooltip("Counter-strafe to stop movement quickly (also triggered by ragebot)");
 
 		ImGui::Spacing();
 		MENU::Separator("Visual");
