@@ -281,9 +281,17 @@ bool TRACE::ClipRayToPlayer(const Vector3& vecStart, const Vector3& vecEnd,
 	ray.m_vecMaxs = {};
 	ray.m_nUnkType = 0;
 
-	// ClipRayToEntity is scoped to one entity — no filter needed for hitbox intersection
+	// ClipRayToEntity dereferences the filter (vtable call) — must NOT be nullptr
+	alignas(16) CTraceFilter_Engine filterBuf{};
+	TraceFilter_t* pFilter = nullptr;
+	if (g_pfnInitFilter)
+	{
+		g_pfnInitFilter(&filterBuf, reinterpret_cast<uintptr_t>(pSkipEntity), TRACE_MASK_SHOT, 4, 7);
+		pFilter = reinterpret_cast<TraceFilter_t*>(&filterBuf);
+	}
+
 	GameTrace_t clipTrace{};
-	const bool bClipOk = I::GameTraceManager->ClipRayToEntity(&ray, vecStart, vecEnd, pTargetPawn, nullptr, &clipTrace);
+	const bool bClipOk = I::GameTraceManager->ClipRayToEntity(&ray, vecStart, vecEnd, pTargetPawn, pFilter, &clipTrace);
 
 	if (pOutTrace)
 		*pOutTrace = clipTrace;
